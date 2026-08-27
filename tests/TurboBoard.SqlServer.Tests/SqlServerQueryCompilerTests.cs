@@ -164,4 +164,29 @@ public sealed class SqlServerQueryCompilerTests
 
         Assert.Equal("query.filter.parameter-limit", Assert.Single(exception.Diagnostics).Code);
     }
+
+    [Fact]
+    public void Query_parameter_payload_is_bound_and_never_appears_in_generated_sql()
+    {
+        const string payload = "50%'; DROP TABLE Items;--";
+        var sourceId = Guid.NewGuid();
+        var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow,
+        [new SchemaDatabaseObject(new("dbo", "Items"), DatabaseObjectKind.Table,
+        [new SchemaColumn("Code", 1, NormalizedTypeCategory.Text, "nvarchar", false, 100, null, null, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)])]);
+        var definition = new QueryDefinition(
+            QueryDefinition.CurrentVersion,
+            new(sourceId, new("dbo", "Items")),
+            [new(sourceId, "Code", "Code")],
+            FilterExpression: new QueryFilterCondition(Guid.NewGuid(), true,
+                new(sourceId, "Code", QueryFilterOperator.Equal, [], [new QueryParameterReference("code")])),
+            Parameters: [new("code", "Code", NormalizedTypeCategory.Text, true, null)]);
+        var prepared = QueryEngine.Prepare(schema, definition, new Dictionary<string, string?> { ["code"] = payload });
+
+        var compiled = new SqlServerQueryCompiler().Compile(prepared.Query!, 10);
+
+        Assert.Equal("SELECT TOP (11) [q].[Code] AS [Code] FROM [dbo].[Items] AS [q] WHERE [q].[Code] = @p0;", compiled.InspectionText);
+        Assert.DoesNotContain(payload, compiled.InspectionText, StringComparison.Ordinal);
+        Assert.Equal(payload, Assert.Single(compiled.Parameters).Value);
+        Assert.Equal("nvarchar", compiled.Parameters[0].ProviderType);
+    }
 }

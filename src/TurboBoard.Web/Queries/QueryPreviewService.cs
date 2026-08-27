@@ -17,6 +17,7 @@ internal sealed class QueryPreviewService(
     public async Task<QueryPreviewResponse> PreviewAsync(
         Guid dataSourceId,
         QueryDefinition definition,
+        IReadOnlyDictionary<string, string?>? parameterValues = null,
         CancellationToken cancellationToken = default)
     {
         var schema = await schemas.GetAsync(dataSourceId, cancellationToken);
@@ -30,7 +31,7 @@ internal sealed class QueryPreviewService(
                 null);
         }
 
-        var preparation = QueryEngine.Prepare(schema, definition);
+        var preparation = QueryEngine.Prepare(schema, definition, parameterValues);
         if (!preparation.IsValid)
         {
             return new(QueryPreviewStatus.ValidationFailed, preparation.Diagnostics, null, null);

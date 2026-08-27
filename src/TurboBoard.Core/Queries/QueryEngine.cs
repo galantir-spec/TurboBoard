@@ -6,7 +6,10 @@ namespace TurboBoard.Core.Queries;
 
 public static partial class QueryEngine
 {
-    public static QueryPreparationResult Prepare(DataSourceSchema schema, QueryDefinition definition)
+    public static QueryPreparationResult Prepare(
+        DataSourceSchema schema,
+        QueryDefinition definition,
+        IReadOnlyDictionary<string, string?>? parameterValues = null)
     {
         ArgumentNullException.ThrowIfNull(schema);
         ArgumentNullException.ThrowIfNull(definition);
@@ -74,13 +77,70 @@ public static partial class QueryEngine
                 QueryFilterGroupOperator.And,
                 definition.AvailableFilters.Select(filter => (QueryFilterExpression)new QueryFilterCondition(Guid.Empty, true, filter)).ToArray());
         }
+        var runtimeValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        if (parameterValues is not null) foreach (var item in parameterValues) runtimeValues.TryAdd(item.Key, item.Value);
+        var parameters = ValidateParameters(definition.AvailableParameters, runtimeValues, diagnostics);
         var editorIds = new HashSet<Guid>();
-        var executableExpression = PrepareExpression(definitionExpression, definition.Source.Id, source, diagnostics, editorIds, validateIdentity: definition.FilterExpression is not null);
+        var executableExpression = PrepareExpression(definitionExpression, definition.Source.Id, source, diagnostics, editorIds, validateIdentity: definition.FilterExpression is not null, parameters);
         var executableFilters = Flatten(executableExpression).ToArray();
 
         return diagnostics.Count == 0 && source is not null
             ? new(new ExecutableQuery(definition.Source.Id, source, executableSelections, executableFilters, executableExpression), diagnostics)
             : new(null, diagnostics);
+    }
+
+    private static IReadOnlyDictionary<string, PreparedParameter> ValidateParameters(
+        IReadOnlyList<QueryParameterDefinition> definitions,
+        IReadOnlyDictionary<string, string?> runtimeValues,
+        ICollection<ValidationDiagnostic> diagnostics)
+    {
+        var parameters = new Dictionary<string, PreparedParameter>(StringComparer.OrdinalIgnoreCase);
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var parameter in definitions)
+        {
+            if (!OutputNamePattern().IsMatch(parameter.Name)) diagnostics.Add(new("query.parameter.name-invalid", $"Query Parameter name '{parameter.Name}' is not valid."));
+            if (!names.Add(parameter.Name)) diagnostics.Add(new("query.parameter.name-duplicate", $"Query Parameter name '{parameter.Name}' is used more than once."));
+            if (string.IsNullOrWhiteSpace(parameter.DisplayName)) diagnostics.Add(new("query.parameter.display-name-required", $"Query Parameter '{parameter.Name}' needs a display name."));
+            var typeSupported = IsSupportedParameterType(parameter.Type);
+            if (!typeSupported) diagnostics.Add(new("query.parameter.type-unsupported", $"Query Parameter '{parameter.Name}' uses an unsupported type."));
+            object? defaultValue = null;
+            var defaultValid = parameter.DefaultValue is null || typeSupported && TryParseParameterValue(parameter.Type, parameter.DefaultValue, out defaultValue);
+            if (!defaultValid) diagnostics.Add(new("query.parameter.default-invalid", $"Default value for Query Parameter '{parameter.Name}' is not valid for {parameter.Type}."));
+            var hasRuntimeValue = runtimeValues.TryGetValue(parameter.Name, out var runtimeValue) && runtimeValue is not null;
+            var hasValue = hasRuntimeValue || parameter.DefaultValue is not null;
+            var value = hasRuntimeValue ? null : defaultValue;
+            if (parameter.IsRequired && !hasValue) diagnostics.Add(new("query.parameter.value-required", $"Query Parameter '{parameter.DisplayName}' needs a value."));
+            if (hasRuntimeValue && typeSupported && !TryParseParameterValue(parameter.Type, runtimeValue!, out value)) diagnostics.Add(new("query.parameter.value-invalid", $"Value for Query Parameter '{parameter.DisplayName}' is not valid for {parameter.Type}."));
+            if (!parameters.ContainsKey(parameter.Name)) parameters.Add(parameter.Name, new(parameter, hasValue, value));
+        }
+        return parameters;
+    }
+
+    private static bool IsSupportedParameterType(NormalizedTypeCategory type) => type is
+        NormalizedTypeCategory.Text or
+        NormalizedTypeCategory.Integer or
+        NormalizedTypeCategory.Decimal or
+        NormalizedTypeCategory.FloatingPoint or
+        NormalizedTypeCategory.Boolean or
+        NormalizedTypeCategory.Date or
+        NormalizedTypeCategory.DateTime or
+        NormalizedTypeCategory.Guid;
+
+    private static bool TryParseParameterValue(NormalizedTypeCategory type, string value, out object? parsed)
+    {
+        parsed = value;
+        switch (type)
+        {
+            case NormalizedTypeCategory.Text: return true;
+            case NormalizedTypeCategory.Integer when long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer): parsed = integer; return true;
+            case NormalizedTypeCategory.Decimal when decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var decimalValue): parsed = decimalValue; return true;
+            case NormalizedTypeCategory.FloatingPoint when double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var floating) && double.IsFinite(floating): parsed = floating; return true;
+            case NormalizedTypeCategory.Boolean when bool.TryParse(value, out var boolean): parsed = boolean; return true;
+            case NormalizedTypeCategory.Date when DateOnly.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date): parsed = date; return true;
+            case NormalizedTypeCategory.DateTime when DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dateTime): parsed = dateTime; return true;
+            case NormalizedTypeCategory.Guid when Guid.TryParse(value, out var guid): parsed = guid; return true;
+            default: parsed = null; return false;
+        }
     }
 
     private static ExecutableFilterExpression? PrepareExpression(
@@ -89,7 +149,8 @@ public static partial class QueryEngine
         SchemaDatabaseObject? source,
         ICollection<ValidationDiagnostic> diagnostics,
         ISet<Guid> editorIds,
-        bool validateIdentity)
+        bool validateIdentity,
+        IReadOnlyDictionary<string, PreparedParameter> parameters)
     {
         if (expression is null || !expression.IsEnabled) return null;
         if (validateIdentity && (expression.Id == Guid.Empty || !editorIds.Add(expression.Id)))
@@ -100,7 +161,7 @@ public static partial class QueryEngine
         switch (expression)
         {
             case QueryFilterCondition condition:
-                var filter = PrepareFilter(condition.Filter, sourceId, source, diagnostics);
+                var filter = PrepareFilter(condition.Filter, sourceId, source, diagnostics, parameters);
                 return filter is null ? null : new ExecutableFilterCondition(filter);
             case QueryFilterNot not:
                 if (not.Operand is null)
@@ -109,7 +170,7 @@ public static partial class QueryEngine
                     return null;
                 }
                 if (!not.Operand.IsEnabled) return null;
-                var operand = PrepareExpression(not.Operand, sourceId, source, diagnostics, editorIds, validateIdentity);
+                var operand = PrepareExpression(not.Operand, sourceId, source, diagnostics, editorIds, validateIdentity, parameters);
                 return operand is null ? null : new ExecutableFilterNot(operand);
             case QueryFilterGroup group:
                 if (group.Children.Count == 0)
@@ -117,7 +178,7 @@ public static partial class QueryEngine
                     diagnostics.Add(new("query.filter.group-empty", $"{group.Operator} group needs at least one condition or group."));
                     return null;
                 }
-                var children = group.Children.Select(child => PrepareExpression(child, sourceId, source, diagnostics, editorIds, validateIdentity)).Where(child => child is not null).Cast<ExecutableFilterExpression>().ToArray();
+                var children = group.Children.Select(child => PrepareExpression(child, sourceId, source, diagnostics, editorIds, validateIdentity, parameters)).Where(child => child is not null).Cast<ExecutableFilterExpression>().ToArray();
                 return children.Length == 0 ? null : new ExecutableFilterGroup(group.Operator, children);
             default:
                 diagnostics.Add(new("query.filter.expression-unknown", "The filter expression contains an unsupported node."));
@@ -125,24 +186,66 @@ public static partial class QueryEngine
         }
     }
 
-    private static ExecutableFilter? PrepareFilter(QueryFilter filter, Guid sourceId, SchemaDatabaseObject? source, ICollection<ValidationDiagnostic> diagnostics)
+    private static ExecutableFilter? PrepareFilter(
+        QueryFilter filter,
+        Guid sourceId,
+        SchemaDatabaseObject? source,
+        ICollection<ValidationDiagnostic> diagnostics,
+        IReadOnlyDictionary<string, PreparedParameter> parameters)
     {
         if (filter.SourceId != sourceId) { diagnostics.Add(new("query.filter.source-unknown", $"Filter column '{filter.ColumnName}' refers to an unknown source.")); return null; }
         var column = source?.Columns.SingleOrDefault(item => string.Equals(item.Name, filter.ColumnName, StringComparison.OrdinalIgnoreCase));
         if (column is null || !column.Capabilities.HasFlag(SchemaColumnCapabilities.Filter)) { diagnostics.Add(new("query.filter.column-unknown", $"Column '{filter.ColumnName}' cannot be filtered in the current Schema.")); return null; }
         if (!IsCompatible(column.NormalizedType, filter.Operator)) { diagnostics.Add(new("query.filter.operator-incompatible", $"Operator '{filter.Operator}' is not compatible with {column.NormalizedType} column '{column.Name}'.")); return null; }
+        var operands = filter.AvailableOperands;
         var requiredCount = RequiredValueCount(filter.Operator);
-        if (filter.Operator is QueryFilterOperator.In or QueryFilterOperator.NotIn && filter.Values.Count == 0) { diagnostics.Add(new("query.filter.values-required", $"Operator '{filter.Operator}' needs at least one value.")); return null; }
-        if (requiredCount is not null && filter.Values.Count != requiredCount) { diagnostics.Add(new("query.filter.value-count", $"Operator '{filter.Operator}' needs {requiredCount} value(s).")); return null; }
+        if (filter.Operator is QueryFilterOperator.In or QueryFilterOperator.NotIn && operands.Count == 0) { diagnostics.Add(new("query.filter.values-required", $"Operator '{filter.Operator}' needs at least one value.")); return null; }
+        if (requiredCount is not null && operands.Count != requiredCount) { diagnostics.Add(new("query.filter.value-count", $"Operator '{filter.Operator}' needs {requiredCount} value(s).")); return null; }
         var typedValues = new List<object>();
-        foreach (var value in filter.Values)
+        foreach (var operand in operands)
         {
-            if (value is null) { diagnostics.Add(new("query.filter.null-comparison", "Use IS NULL or IS NOT NULL instead of a null fixed value.")); return null; }
-            if (!TryParseValue(column, value, out var typedValue)) { diagnostics.Add(new("query.filter.value-incompatible", $"Value '{value}' is not valid for {column.NormalizedType} column '{column.Name}'.")); return null; }
-            typedValues.Add(typedValue!);
+            if (operand is QueryFixedValue fixedValue)
+            {
+                if (fixedValue.Value is null) { diagnostics.Add(new("query.filter.null-comparison", "Use IS NULL or IS NOT NULL instead of a null fixed value.")); return null; }
+                if (!TryParseValue(column, fixedValue.Value, out var typedValue)) { diagnostics.Add(new("query.filter.value-incompatible", $"Value '{fixedValue.Value}' is not valid for {column.NormalizedType} column '{column.Name}'.")); return null; }
+                typedValues.Add(typedValue!);
+            }
+            else if (operand is QueryParameterReference reference && parameters.TryGetValue(reference.Name, out var parameter))
+            {
+                if (parameter.Definition.Type != column.NormalizedType)
+                {
+                    diagnostics.Add(new("query.parameter.type-incompatible", $"Query Parameter '{parameter.Definition.Name}' is not compatible with column '{column.Name}'."));
+                    return null;
+                }
+                if (!parameter.HasValue) { diagnostics.Add(new("query.parameter.value-required", $"Query Parameter '{parameter.Definition.DisplayName}' needs a value for this filter.")); return null; }
+                if (parameter.Value is null) return null;
+                var canonicalValue = FormatParameterValue(parameter.Value);
+                if (!TryParseValue(column, canonicalValue, out var adapted)) { diagnostics.Add(new("query.parameter.value-incompatible", $"Value for Query Parameter '{parameter.Definition.DisplayName}' is outside the range supported by column '{column.Name}'.")); return null; }
+                typedValues.Add(adapted!);
+            }
+            else
+            {
+                diagnostics.Add(new("query.parameter.reference-unknown", "A filter refers to an unknown Query Parameter."));
+                return null;
+            }
         }
         return new(column, filter.Operator, typedValues);
     }
+
+    private static string FormatParameterValue(object value) => value switch
+    {
+        string text => text,
+        bool boolean => boolean.ToString(),
+        long integer => integer.ToString(CultureInfo.InvariantCulture),
+        decimal decimalValue => decimalValue.ToString(CultureInfo.InvariantCulture),
+        double floating => floating.ToString("R", CultureInfo.InvariantCulture),
+        DateOnly date => date.ToString("O", CultureInfo.InvariantCulture),
+        DateTimeOffset dateTime => dateTime.ToString("O", CultureInfo.InvariantCulture),
+        Guid guid => guid.ToString("D"),
+        _ => throw new InvalidOperationException("Unsupported prepared Query Parameter value."),
+    };
+
+    private sealed record PreparedParameter(QueryParameterDefinition Definition, bool HasValue, object? Value);
 
     private static IEnumerable<ExecutableFilter> Flatten(ExecutableFilterExpression? expression) => expression switch
     {

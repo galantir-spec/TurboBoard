@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using TurboBoard.Core.DataSources;
 using TurboBoard.Core.Schemas;
 using TurboBoard.Web.DataSources;
@@ -182,14 +183,56 @@ public sealed class ApplicationShellTests
         _ = await schemas.RefreshAsync(dataSourceId);
         var sourceId = Guid.NewGuid();
 
-        var preview = await previews.PreviewAsync(dataSourceId, new QueryDefinition(
+        var definition = new QueryDefinition(
             QueryDefinition.CurrentVersion,
             new(sourceId, new("sales", "Orders")),
-            [new(sourceId, "Id", "OrderId")]));
+            [new(sourceId, "Id", "OrderId")],
+            FilterExpression: new QueryFilterCondition(Guid.NewGuid(), true,
+                new(sourceId, "Id", QueryFilterOperator.Equal, [], [new QueryParameterReference("orderId")])),
+            Parameters: [new("orderId", "Order ID", NormalizedTypeCategory.Integer, true, null)]);
+
+        var preview = await previews.PreviewAsync(dataSourceId, definition, new Dictionary<string, string?> { ["orderId"] = "42" });
+        var repeated = await previews.PreviewAsync(dataSourceId, definition, new Dictionary<string, string?> { ["orderId"] = "43" });
 
         Assert.Equal(QueryPreviewStatus.Succeeded, preview.Status);
+        Assert.Equal(QueryPreviewStatus.Succeeded, repeated.Status);
         Assert.Contains("SELECT TOP (101)", preview.GeneratedSql, StringComparison.Ordinal);
+        Assert.Contains("@p0", preview.GeneratedSql, StringComparison.Ordinal);
+        Assert.DoesNotContain("42", preview.GeneratedSql, StringComparison.Ordinal);
         Assert.Equal(42, Assert.Single(preview.Result!.Rows).Values[0]);
+        Assert.Equal("orderId", Assert.Single(definition.AvailableParameters).Name);
+    }
+
+    [Fact]
+    public async Task Query_preview_failure_logs_exclude_runtime_parameter_values()
+    {
+        using var stateDirectory = TemporaryDirectory.Create();
+        var logs = new RecordingLoggerProvider();
+        await using var application = new TurboBoardApplicationFactory(
+            stateDirectory.Path,
+            services =>
+            {
+                services.AddLogging(builder => builder.AddProvider(logs));
+                services.RemoveAll<IDataSourceSchemaDiscoverer>();
+                services.AddSingleton<IDataSourceSchemaDiscoverer, ExplorerSchemaDiscoverer>();
+                services.RemoveAll<IQueryExecutor>();
+                services.AddSingleton<IQueryExecutor, ThrowingQueryExecutor>();
+            });
+        await using var scope = application.Services.CreateAsyncScope();
+        var dataSources = scope.ServiceProvider.GetRequiredService<IDataSourceService>();
+        var schemas = scope.ServiceProvider.GetRequiredService<ISchemaService>();
+        var previews = scope.ServiceProvider.GetRequiredService<IQueryPreviewService>();
+        var dataSourceId = await dataSources.SaveAsync(null, DataSourceDraft.Structured("Warehouse", "sql.internal", "analytics", true));
+        _ = await schemas.RefreshAsync(dataSourceId);
+        var sourceId = Guid.NewGuid();
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("sales", "Orders")), [new(sourceId, "Id", "Id")],
+            FilterExpression: new QueryFilterCondition(Guid.NewGuid(), true, new(sourceId, "Id", QueryFilterOperator.Equal, [], [new QueryParameterReference("orderId")])),
+            Parameters: [new("orderId", "Order ID", NormalizedTypeCategory.Integer, true, null)]);
+
+        var result = await previews.PreviewAsync(dataSourceId, definition, new Dictionary<string, string?> { ["orderId"] = "424242" });
+
+        Assert.Equal(QueryPreviewStatus.Failed, result.Status);
+        Assert.DoesNotContain(logs.Messages, message => message.Contains("424242", StringComparison.Ordinal));
     }
 
     private sealed class TurboBoardApplicationFactory(
@@ -220,7 +263,7 @@ public sealed class ApplicationShellTests
                 new SchemaDatabaseObject(
                     new QualifiedDatabaseObjectName("sales", "Orders"),
                     DatabaseObjectKind.Table,
-                    [new SchemaColumn("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select, true)],
+                    [new SchemaColumn("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter, true)],
                     [new SchemaKey("PK_Orders", SchemaKeyKind.Primary, ["Id"])]),
                 new SchemaDatabaseObject(
                     new QualifiedDatabaseObjectName("crm", "Customers"),
@@ -236,6 +279,25 @@ public sealed class ApplicationShellTests
 
         public Task<DynamicResult> ExecuteAsync(DataSourceConnectionRequest connection, ICompiledQuery query, CancellationToken cancellationToken = default) =>
             Task.FromResult(new DynamicResult(query.Columns, [new DynamicResultRow([42])], TimeSpan.FromMilliseconds(5), false));
+    }
+
+    private sealed class ThrowingQueryExecutor : IQueryExecutor
+    {
+        public string ProviderKey => "sql-server";
+        public Task<DynamicResult> ExecuteAsync(DataSourceConnectionRequest connection, ICompiledQuery query, CancellationToken cancellationToken = default) => throw new InvalidOperationException("Test failure.");
+    }
+
+    private sealed class RecordingLoggerProvider : ILoggerProvider
+    {
+        public List<string> Messages { get; } = [];
+        public ILogger CreateLogger(string categoryName) => new RecordingLogger(Messages);
+        public void Dispose() { }
+        private sealed class RecordingLogger(List<string> messages) : ILogger
+        {
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+            public bool IsEnabled(LogLevel logLevel) => true;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) => messages.Add(formatter(state, exception));
+        }
     }
 
     private sealed class TemporaryDirectory : IDisposable

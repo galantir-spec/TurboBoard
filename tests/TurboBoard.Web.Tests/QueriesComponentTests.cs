@@ -178,6 +178,63 @@ public sealed class QueriesComponentTests
         Assert.Contains("Orders", component.FindAll("select")[0].TextContent, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Parameter_declarations_save_while_runtime_values_only_flow_to_preview()
+    {
+        using var context = CreateContext(out var savedQueries);
+        var previews = Assert.IsType<FakePreviewService>(context.Services.GetRequiredService<IQueryPreviewService>());
+        var component = context.Render<QueriesPage>();
+        component.FindAll("select")[1].Change(TestDataSource.Id.ToString());
+        component.FindAll("select")[2].Change("sales.Orders");
+        component.Find("input[maxlength='200']").Input("Orders by parameter");
+        component.Find("input[type='checkbox']").Change(true);
+        component.FindAll("button").Single(button => button.TextContent.Trim() == "Add parameter").Click();
+        component.Find(".parameter-name").Input("orderId");
+        component.Find(".parameter-display-name").Input("Order ID");
+        component.Find(".parameter-type").Change(NormalizedTypeCategory.Integer.ToString());
+        component.Find(".parameter-required").Change(true);
+        component.Find(".parameter-default").Input("7");
+        Assert.Equal("7", component.Find(".parameter-run input").GetAttribute("value"));
+        component.FindAll("button").Single(button => button.TextContent.Trim() == "Add condition").Click();
+        component.Find(".operand-kind").Change("parameter");
+        component.Find(".parameter-reference").Change("orderId");
+        component.Find(".parameter-run input").Input("42");
+
+        component.FindAll("button").Single(button => button.TextContent.Trim() == "Run preview").Click();
+        component.FindAll("button").Single(button => button.TextContent.Trim() == "Save As").Click();
+
+        Assert.Equal("42", previews.ParameterValueRuns[0]["orderId"]);
+        Assert.Equal("orderId", Assert.Single(savedQueries.LastDraft!.Definition.AvailableParameters).Name);
+        var filter = Assert.IsType<QueryFilterCondition>(Assert.IsType<QueryFilterGroup>(savedQueries.LastDraft.Definition.FilterExpression).Children.Single()).Filter;
+        Assert.Equal("orderId", Assert.IsType<QueryParameterReference>(Assert.Single(filter.AvailableOperands)).Name);
+        Assert.DoesNotContain("42", savedQueries.LastDraft.Definition.AvailableParameters.Select(item => item.DefaultValue));
+
+        component.Find(".parameter-run input").Input("43");
+        component.FindAll("button").Single(button => button.TextContent.Trim() == "Run preview").Click();
+        Assert.Equal("43", previews.ParameterValueRuns[1]["orderId"]);
+        Assert.DoesNotContain("You have unsaved changes", component.Markup, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(NormalizedTypeCategory.Text, "text")]
+    [InlineData(NormalizedTypeCategory.Integer, "number")]
+    [InlineData(NormalizedTypeCategory.Decimal, "number")]
+    [InlineData(NormalizedTypeCategory.FloatingPoint, "number")]
+    [InlineData(NormalizedTypeCategory.Boolean, "checkbox")]
+    [InlineData(NormalizedTypeCategory.Date, "date")]
+    [InlineData(NormalizedTypeCategory.DateTime, "datetime-local")]
+    [InlineData(NormalizedTypeCategory.Guid, "text")]
+    public void Run_inputs_use_controls_appropriate_for_the_parameter_type(NormalizedTypeCategory type, string expectedInputType)
+    {
+        using var context = CreateContext(out _);
+        var component = context.Render<QueriesPage>();
+        component.FindAll("button").Single(button => button.TextContent.Trim() == "Add parameter").Click();
+
+        component.Find(".parameter-type").Change(type.ToString());
+
+        Assert.Equal(expectedInputType, component.Find(".parameter-run input").GetAttribute("type"));
+    }
+
     private static BunitContext CreateContext(out FakeSavedQueryService savedQueries)
     {
         var context = new BunitContext();
@@ -227,9 +284,11 @@ public sealed class QueriesComponentTests
     private sealed class FakePreviewService : IQueryPreviewService
     {
         public QueryDefinition? LastDefinition { get; private set; }
-        public Task<QueryPreviewResponse> PreviewAsync(Guid dataSourceId, QueryDefinition definition, CancellationToken cancellationToken = default)
+        public List<IReadOnlyDictionary<string, string?>> ParameterValueRuns { get; } = [];
+        public Task<QueryPreviewResponse> PreviewAsync(Guid dataSourceId, QueryDefinition definition, IReadOnlyDictionary<string, string?>? parameterValues = null, CancellationToken cancellationToken = default)
         {
             LastDefinition = definition;
+            ParameterValueRuns.Add(parameterValues ?? new Dictionary<string, string?>());
             return Task.FromResult(new QueryPreviewResponse(QueryPreviewStatus.Succeeded, [], "SELECT", null));
         }
     }

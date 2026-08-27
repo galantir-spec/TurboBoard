@@ -138,6 +138,37 @@ public sealed class SavedQueryLifecycleTests
     }
 
     [Fact]
+    public async Task Version_two_definitions_migrate_and_parameter_references_survive_restart()
+    {
+        using var database = TemporaryDatabase.Create();
+        var dataSourceId = Guid.NewGuid();
+        var sourceId = Guid.NewGuid();
+        var definition = new QueryDefinition(
+            QueryDefinition.CurrentVersion,
+            new(sourceId, new("sales", "Orders")),
+            [new(sourceId, "Id", "Id")],
+            FilterExpression: new QueryFilterCondition(Guid.NewGuid(), true,
+                new(sourceId, "Id", QueryFilterOperator.Equal, [], [new QueryParameterReference("orderId")])),
+            Parameters: [new("orderId", "Order ID", NormalizedTypeCategory.Integer, true, null)]);
+        Guid id;
+        await using (var host = await SavedQueryTestHost.CreateAsync(database.Path))
+        {
+            await host.AddDataSourceAsync(dataSourceId);
+            id = await host.WithServiceAsync(service => service.SaveAsync(null, new(dataSourceId, "By ID", "", definition)));
+        }
+
+        await using var restarted = await SavedQueryTestHost.CreateAsync(database.Path);
+        var reopened = await restarted.WithServiceAsync(service => service.GetAsync(id));
+        var condition = Assert.IsType<QueryFilterCondition>(reopened!.Definition!.FilterExpression);
+
+        Assert.Equal("orderId", Assert.IsType<QueryParameterReference>(Assert.Single(condition.Filter.AvailableOperands)).Name);
+        Assert.Equal("Order ID", Assert.Single(reopened.Definition.AvailableParameters).DisplayName);
+        var migrated = restarted.Deserialize("{\"version\":2,\"source\":{\"id\":\"11111111-1111-1111-1111-111111111111\",\"object\":{\"schema\":\"sales\",\"name\":\"Orders\"}},\"selections\":[{\"sourceId\":\"11111111-1111-1111-1111-111111111111\",\"columnName\":\"Id\",\"outputName\":\"Id\"}]}");
+        Assert.Equal(QueryDefinition.CurrentVersion, migrated.Definition?.Version);
+        Assert.Empty(migrated.Definition!.AvailableParameters);
+    }
+
+    [Fact]
     public async Task Unsupported_definition_metadata_can_be_edited_without_rewriting_its_json()
     {
         using var database = TemporaryDatabase.Create();

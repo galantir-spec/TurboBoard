@@ -31,7 +31,26 @@ public sealed record QueryFilter(
     Guid SourceId,
     string ColumnName,
     QueryFilterOperator Operator,
-    IReadOnlyList<string?> Values);
+    IReadOnlyList<string?> Values,
+    IReadOnlyList<QueryFilterOperand>? Operands = null)
+{
+    public IReadOnlyList<QueryFilterOperand> AvailableOperands => Operands ?? Values.Select(value => (QueryFilterOperand)new QueryFixedValue(value)).ToArray();
+}
+
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "$type")]
+[JsonDerivedType(typeof(QueryFixedValue), "fixed")]
+[JsonDerivedType(typeof(QueryParameterReference), "parameter")]
+public abstract record QueryFilterOperand;
+
+public sealed record QueryFixedValue(string? Value) : QueryFilterOperand;
+public sealed record QueryParameterReference(string Name) : QueryFilterOperand;
+
+public sealed record QueryParameterDefinition(
+    string Name,
+    string DisplayName,
+    NormalizedTypeCategory Type,
+    bool IsRequired,
+    string? DefaultValue);
 
 public enum QueryFilterGroupOperator
 {
@@ -63,10 +82,12 @@ public sealed record QueryDefinition(
     QuerySource Source,
     IReadOnlyList<QuerySelection> Selections,
     IReadOnlyList<QueryFilter>? Filters = null,
-    QueryFilterExpression? FilterExpression = null)
+    QueryFilterExpression? FilterExpression = null,
+    IReadOnlyList<QueryParameterDefinition>? Parameters = null)
 {
-    public const int CurrentVersion = 2;
+    public const int CurrentVersion = 3;
     public IReadOnlyList<QueryFilter> AvailableFilters => Filters ?? [];
+    public IReadOnlyList<QueryParameterDefinition> AvailableParameters => Parameters ?? [];
 }
 
 public sealed record ValidationDiagnostic(string Code, string Message);

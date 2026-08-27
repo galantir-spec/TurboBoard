@@ -21,5 +21,6 @@ public interface IQueryPreviewService
     Task<QueryPreviewResponse> PreviewAsync(
         Guid dataSourceId,
         QueryDefinition definition,
+        IReadOnlyDictionary<string, string?>? parameterValues = null,
         CancellationToken cancellationToken = default);
 }

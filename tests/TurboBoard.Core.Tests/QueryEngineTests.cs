@@ -342,6 +342,142 @@ public sealed class QueryEngineTests
         Assert.Equal("query.filter.group-empty", Assert.Single(result.Diagnostics).Code);
     }
 
+    [Fact]
+    public void Parameter_reference_uses_a_runtime_value_without_changing_the_definition()
+    {
+        var sourceId = Guid.NewGuid();
+        var parameter = new QueryParameterDefinition("minimumOrderId", "Minimum order ID", NormalizedTypeCategory.Integer, true, null);
+        var filter = new QueryFilter(sourceId, "OrderId", QueryFilterOperator.GreaterThan, [], [new QueryParameterReference("minimumOrderId")]);
+        var definition = new QueryDefinition(
+            QueryDefinition.CurrentVersion,
+            new(sourceId, new("sales", "Orders")),
+            [new(sourceId, "OrderId", "OrderId")],
+            FilterExpression: new QueryFilterCondition(Guid.NewGuid(), true, filter),
+            Parameters: [parameter]);
+
+        var result = QueryEngine.Prepare(SchemaWithOrders(), definition, new Dictionary<string, string?> { ["MINIMUMORDERID"] = "42" });
+
+        Assert.True(result.IsValid);
+        Assert.Equal(42, Assert.Single(Assert.Single(result.Query!.Filters).Values));
+        Assert.Equal("minimumOrderId", Assert.IsType<QueryParameterReference>(Assert.Single(filter.AvailableOperands)).Name);
+    }
+
+    [Fact]
+    public void Invalid_parameter_declarations_and_missing_required_values_return_focused_diagnostics()
+    {
+        var sourceId = Guid.NewGuid();
+        var definition = new QueryDefinition(
+            QueryDefinition.CurrentVersion,
+            new(sourceId, new("sales", "Orders")),
+            [new(sourceId, "OrderId", "OrderId")],
+            Parameters:
+            [
+                new("minimum", "Minimum", NormalizedTypeCategory.Integer, true, null),
+                new("MINIMUM", "Duplicate", NormalizedTypeCategory.Integer, false, null),
+                new("bad name", "", NormalizedTypeCategory.Unknown, false, "x"),
+                new("fallback", "Fallback", NormalizedTypeCategory.Integer, false, "not-an-integer"),
+            ]);
+
+        var result = QueryEngine.Prepare(SchemaWithOrders(), definition);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Diagnostics, item => item.Code == "query.parameter.name-duplicate");
+        Assert.Contains(result.Diagnostics, item => item.Code == "query.parameter.name-invalid");
+        Assert.Contains(result.Diagnostics, item => item.Code == "query.parameter.display-name-required");
+        Assert.Contains(result.Diagnostics, item => item.Code == "query.parameter.type-unsupported");
+        Assert.Contains(result.Diagnostics, item => item.Code == "query.parameter.default-invalid");
+        Assert.Contains(result.Diagnostics, item => item.Code == "query.parameter.value-required");
+    }
+
+    [Fact]
+    public void Defaults_and_repeated_runtime_values_prepare_independent_queries()
+    {
+        var sourceId = Guid.NewGuid();
+        var definition = new QueryDefinition(
+            QueryDefinition.CurrentVersion,
+            new(sourceId, new("sales", "Orders")),
+            [new(sourceId, "OrderId", "OrderId")],
+            FilterExpression: new QueryFilterCondition(Guid.NewGuid(), true,
+                new(sourceId, "OrderId", QueryFilterOperator.Equal, [], [new QueryParameterReference("orderId")])),
+            Parameters: [new("orderId", "Order ID", NormalizedTypeCategory.Integer, false, "7")]);
+
+        var withDefault = QueryEngine.Prepare(SchemaWithOrders(), definition);
+        var firstRun = QueryEngine.Prepare(SchemaWithOrders(), definition, new Dictionary<string, string?> { ["orderId"] = "8" });
+        var secondRun = QueryEngine.Prepare(SchemaWithOrders(), definition, new Dictionary<string, string?> { ["orderId"] = "9" });
+
+        Assert.Equal(7, Assert.Single(Assert.Single(withDefault.Query!.Filters).Values));
+        Assert.Equal(8, Assert.Single(Assert.Single(firstRun.Query!.Filters).Values));
+        Assert.Equal(9, Assert.Single(Assert.Single(secondRun.Query!.Filters).Values));
+        Assert.Equal("7", definition.AvailableParameters[0].DefaultValue);
+    }
+
+    [Fact]
+    public void Unknown_and_type_incompatible_parameter_references_are_diagnostics()
+    {
+        var sourceId = Guid.NewGuid();
+        var definition = new QueryDefinition(
+            QueryDefinition.CurrentVersion,
+            new(sourceId, new("sales", "Orders")),
+            [new(sourceId, "OrderId", "OrderId")],
+            FilterExpression: new QueryFilterGroup(Guid.NewGuid(), true, QueryFilterGroupOperator.And,
+            [
+                new QueryFilterCondition(Guid.NewGuid(), true, new(sourceId, "OrderId", QueryFilterOperator.Equal, [], [new QueryParameterReference("missing")])),
+                new QueryFilterCondition(Guid.NewGuid(), true, new(sourceId, "OrderId", QueryFilterOperator.Equal, [], [new QueryParameterReference("textValue")])),
+            ]),
+            Parameters: [new("textValue", "Text value", NormalizedTypeCategory.Text, true, null)]);
+
+        var result = QueryEngine.Prepare(SchemaWithOrders(), definition, new Dictionary<string, string?> { ["textValue"] = "42" });
+
+        Assert.Contains(result.Diagnostics, item => item.Code == "query.parameter.reference-unknown");
+        Assert.Contains(result.Diagnostics, item => item.Code == "query.parameter.type-incompatible");
+    }
+
+    [Fact]
+    public void Runtime_parameter_values_coerce_to_supported_types_once_per_run()
+    {
+        var sourceId = Guid.NewGuid();
+        var columns = new[]
+        {
+            new SchemaColumn("Text", 1, NormalizedTypeCategory.Text, "nvarchar", false, 100, null, null, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter),
+            new SchemaColumn("Integer", 2, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Filter),
+            new SchemaColumn("Decimal", 3, NormalizedTypeCategory.Decimal, "decimal", false, 9, 10, 2, SchemaColumnCapabilities.Filter),
+            new SchemaColumn("Floating", 4, NormalizedTypeCategory.FloatingPoint, "float", false, 8, 53, null, SchemaColumnCapabilities.Filter),
+            new SchemaColumn("Boolean", 5, NormalizedTypeCategory.Boolean, "bit", false, 1, null, null, SchemaColumnCapabilities.Filter),
+            new SchemaColumn("Date", 6, NormalizedTypeCategory.Date, "date", false, 3, null, null, SchemaColumnCapabilities.Filter),
+            new SchemaColumn("DateTime", 7, NormalizedTypeCategory.DateTime, "datetimeoffset", false, 10, null, 7, SchemaColumnCapabilities.Filter),
+            new SchemaColumn("Guid", 8, NormalizedTypeCategory.Guid, "uniqueidentifier", false, 16, null, null, SchemaColumnCapabilities.Filter),
+        };
+        var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow, [new(new("dbo", "Values"), DatabaseObjectKind.Table, columns)]);
+        var definitions = columns.Select(column => new QueryParameterDefinition(column.Name, column.Name, column.NormalizedType, true, null)).ToArray();
+        var filters = columns.Select(column => (QueryFilterExpression)new QueryFilterCondition(Guid.NewGuid(), true,
+            new(sourceId, column.Name, QueryFilterOperator.Equal, [], [new QueryParameterReference(column.Name)]))).ToArray();
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Values")), [new(sourceId, "Text", "Text")],
+            FilterExpression: new QueryFilterGroup(Guid.NewGuid(), true, QueryFilterGroupOperator.And, filters), Parameters: definitions);
+        var values = new Dictionary<string, string?>
+        {
+            ["Text"] = "alpha", ["Integer"] = "42", ["Decimal"] = "12.34", ["Floating"] = "1.5", ["Boolean"] = "true",
+            ["Date"] = "2026-08-27", ["DateTime"] = "2026-08-27T20:30:00+02:00", ["Guid"] = "11111111-1111-1111-1111-111111111111",
+        };
+
+        var result = QueryEngine.Prepare(schema, definition, values);
+
+        Assert.True(result.IsValid);
+        Assert.Equal([typeof(string), typeof(int), typeof(decimal), typeof(double), typeof(bool), typeof(DateOnly), typeof(DateTimeOffset), typeof(Guid)], result.Query!.Filters.Select(item => Assert.Single(item.Values).GetType()));
+    }
+
+    [Fact]
+    public void Invalid_runtime_parameter_value_returns_one_focused_diagnostic()
+    {
+        var sourceId = Guid.NewGuid();
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("sales", "Orders")), [new(sourceId, "OrderId", "OrderId")],
+            FilterExpression: new QueryFilterCondition(Guid.NewGuid(), true, new(sourceId, "OrderId", QueryFilterOperator.Equal, [], [new QueryParameterReference("orderId")])),
+            Parameters: [new("orderId", "Order ID", NormalizedTypeCategory.Integer, true, null)]);
+
+        var result = QueryEngine.Prepare(SchemaWithOrders(), definition, new Dictionary<string, string?> { ["orderId"] = "not-an-integer" });
+
+        Assert.Equal("query.parameter.value-invalid", Assert.Single(result.Diagnostics).Code);
+    }
+
     private static DataSourceSchema SchemaWithOrders() =>
         new(Guid.NewGuid(), DateTimeOffset.UtcNow,
         [
