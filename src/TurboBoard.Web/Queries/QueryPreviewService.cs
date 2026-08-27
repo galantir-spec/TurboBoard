@@ -37,7 +37,15 @@ internal sealed class QueryPreviewService(
         }
 
         var compiler = providers.GetQueryCompiler(connection.Request.ProviderKey);
-        var compiled = compiler.Compile(preparation.Query!, DefaultPreviewLimit);
+        ICompiledQuery compiled;
+        try
+        {
+            compiled = compiler.Compile(preparation.Query!, DefaultPreviewLimit);
+        }
+        catch (QueryCompilationException exception)
+        {
+            return new(QueryPreviewStatus.ValidationFailed, exception.Diagnostics, null, null);
+        }
         try
         {
             var result = await providers.GetQueryExecutor(connection.Request.ProviderKey)

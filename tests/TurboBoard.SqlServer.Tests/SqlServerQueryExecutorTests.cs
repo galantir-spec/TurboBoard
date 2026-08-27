@@ -91,6 +91,25 @@ public sealed class SqlServerQueryExecutorTests
         Assert.Equal(12.50m, result.Rows[0].Values[1]);
     }
 
+    [Fact]
+    public void Executor_materializes_parameter_specs_with_sql_server_type_metadata()
+    {
+        using var command = new Microsoft.Data.SqlClient.SqlCommand();
+        var specs = new QueryParameterSpecification[]
+        {
+            new("@p0", 12.34m, "decimal", null, 18, 2),
+            new("@p1", "hello", "nvarchar", 100, null, null),
+        };
+
+        SqlServerQueryExecutor.AddParameters(command, specs);
+
+        Assert.Equal(System.Data.SqlDbType.Decimal, command.Parameters[0].SqlDbType);
+        Assert.Equal((byte)18, command.Parameters[0].Precision);
+        Assert.Equal((byte)2, command.Parameters[0].Scale);
+        Assert.Equal(System.Data.SqlDbType.NVarChar, command.Parameters[1].SqlDbType);
+        Assert.Equal(100, command.Parameters[1].Size);
+    }
+
     private sealed class ForgedPlan : ICompiledQuery
     {
         public string InspectionText => "DROP TABLE Orders";
