@@ -1,0 +1,111 @@
+#components-reconnect-modal {
+    background: hsl(var(--surface));
+    border: var(--border-width-md) solid hsl(var(--border));
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    color: hsl(var(--foreground));
+    margin: 20vh auto 0;
+    max-width: calc(100vw - (2 * var(--space-24)));
+    padding: var(--space-32);
+    text-align: center;
+    width: 22rem;
+}
+
+#components-reconnect-modal::backdrop {
+    background: hsl(var(--overlay) / 0.45);
+}
+
+.components-reconnect-container {
+    display: grid;
+    gap: var(--space-16);
+    justify-items: center;
+}
+
+h2,
+p {
+    margin: 0;
+}
+
+h2 {
+    font-size: 1.25rem;
+    letter-spacing: -0.01em;
+}
+
+p {
+    color: hsl(var(--foreground-neutral));
+    line-height: 1.5;
+}
+
+button {
+    background: hsl(var(--primary));
+    border: 0;
+    border-radius: var(--radius-md);
+    color: hsl(var(--primary-foreground));
+    cursor: pointer;
+    font: inherit;
+    font-weight: 700;
+    min-height: 3rem;
+    padding: 0 var(--space-24);
+}
+
+button:hover {
+    background: hsl(var(--primary-hover));
+}
+
+.components-rejoining-animation {
+    display: none;
+    height: 1.5rem;
+    position: relative;
+    width: 1.5rem;
+}
+
+.components-rejoining-animation div {
+    animation: reconnect-pulse 1.2s ease-in-out infinite;
+    border: var(--space-2) solid hsl(var(--primary));
+    border-radius: var(--radius-max);
+    inset: 0;
+    position: absolute;
+}
+
+.components-rejoining-animation div:nth-child(2) {
+    animation-delay: -0.6s;
+}
+
+.components-reconnect-first-attempt-visible,
+.components-reconnect-repeated-attempt-visible,
+.components-reconnect-failed-visible,
+.components-pause-visible,
+.components-resume-failed-visible {
+    display: none;
+}
+
+.components-reconnect-show .components-reconnect-first-attempt-visible,
+.components-reconnect-retrying .components-reconnect-repeated-attempt-visible,
+.components-reconnect-failed .components-reconnect-failed-visible,
+.components-reconnect-paused .components-pause-visible,
+.components-reconnect-resume-failed .components-resume-failed-visible {
+    display: block;
+}
+
+.components-reconnect-show .components-rejoining-animation,
+.components-reconnect-retrying .components-rejoining-animation {
+    display: block;
+}
+
+@keyframes reconnect-pulse {
+    0% {
+        opacity: 1;
+        transform: scale(0.25);
+    }
+
+    100% {
+        opacity: 0;
+        transform: scale(1);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .components-rejoining-animation div {
+        animation-duration: 2.4s;
+    }
+}

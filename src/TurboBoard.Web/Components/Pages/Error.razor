@@ -1,0 +1,31 @@
+﻿@page "/Error"
+@using System.Diagnostics
+
+<PageTitle>Error · TurboBoard</PageTitle>
+
+<section class="error-state" aria-labelledby="error-title">
+    <span class="error-kicker">Request failed</span>
+    <h1 id="error-title">TurboBoard couldn’t complete this request</h1>
+    <p>Try the request again. If the problem continues, share the request ID with the workspace operator.</p>
+
+    @if (ShowRequestId)
+    {
+        <p class="request-id">
+            <strong>Request ID</strong>
+            <code>@RequestId</code>
+        </p>
+    }
+
+    <a href="/">Return to overview</a>
+</section>
+
+@code {
+    [CascadingParameter]
+    private HttpContext? HttpContext { get; set; }
+
+    private string? RequestId { get; set; }
+    private bool ShowRequestId => !string.IsNullOrEmpty(RequestId);
+
+    protected override void OnInitialized() =>
+        RequestId = Activity.Current?.Id ?? HttpContext?.TraceIdentifier;
+}

@@ -1,0 +1,32 @@
+﻿<script type="module" src="@Assets["Components/Layout/ReconnectModal.razor.js"]"></script>
+
+<dialog id="components-reconnect-modal" aria-labelledby="reconnect-title" data-nosnippet>
+    <div class="components-reconnect-container" aria-live="polite">
+        <h2 id="reconnect-title">Connection interrupted</h2>
+        <div class="components-rejoining-animation" aria-hidden="true">
+            <div></div>
+            <div></div>
+        </div>
+        <p class="components-reconnect-first-attempt-visible">
+            Reconnecting to TurboBoard…
+        </p>
+        <p class="components-reconnect-repeated-attempt-visible">
+            Reconnect failed. Trying again in <span id="components-seconds-to-next-attempt"></span> seconds.
+        </p>
+        <p class="components-reconnect-failed-visible">
+            TurboBoard could not restore this session. Retry or reload the page.
+        </p>
+        <button id="components-reconnect-button" class="components-reconnect-failed-visible" type="button">
+            Retry
+        </button>
+        <p class="components-pause-visible">
+            The session has been paused by the server.
+        </p>
+        <p class="components-resume-failed-visible">
+            TurboBoard could not resume this session. Retry or reload the page.
+        </p>
+        <button id="components-resume-button" class="components-pause-visible components-resume-failed-visible" type="button">
+            Resume
+        </button>
+    </div>
+</dialog>

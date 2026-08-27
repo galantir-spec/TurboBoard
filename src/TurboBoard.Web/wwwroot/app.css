@@ -1,0 +1,235 @@
+:root {
+    color-scheme: light;
+    --font-family-base: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --monta-50: 197 100% 95%;
+    --monta-100: 197 100% 90%;
+    --monta-500: 197 100% 44%;
+    --monta-700: 197 100% 35%;
+    --neutral-25: 200 5% 97%;
+    --neutral-50: 200 5% 95%;
+    --neutral-100: 195 5% 84%;
+    --neutral-300: 195 6% 63%;
+    --neutral-600: 195 11% 41%;
+    --neutral-800: 195 11% 25%;
+    --neutral-950: 195 10% 14%;
+    --base-0: 0 0% 100%;
+    --base-1000: 0 0% 0%;
+    --background: var(--base-0);
+    --background-brand: var(--monta-500);
+    --background-brand-subtle: var(--monta-50);
+    --background-neutral: var(--neutral-25);
+    --surface: var(--base-0);
+    --foreground: var(--base-1000);
+    --foreground-brand: var(--monta-700);
+    --foreground-neutral: var(--neutral-600);
+    --primary: var(--monta-500);
+    --primary-hover: var(--monta-700);
+    --primary-foreground: var(--base-0);
+    --secondary: var(--neutral-50);
+    --secondary-hover: var(--neutral-100);
+    --border: var(--neutral-100);
+    --border-strong: var(--neutral-300);
+    --border-brand: var(--monta-100);
+    --ring: var(--monta-700);
+    --overlay: var(--base-1000);
+    --positive: 142 71% 35%;
+    --positive-subtle: 142 55% 88%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: var(--base-0);
+    --space-0: 0;
+    --space-2: 0.125rem;
+    --space-4: 0.25rem;
+    --space-8: 0.5rem;
+    --space-12: 0.75rem;
+    --space-16: 1rem;
+    --space-24: 1.5rem;
+    --space-32: 2rem;
+    --space-40: 2.5rem;
+    --space-48: 3rem;
+    --radius-sm: 0.25rem;
+    --radius-md: 0.5rem;
+    --radius-lg: 1rem;
+    --radius-max: 9999px;
+    --border-width-md: 1px;
+    --shadow-sm: 0 1px 2px hsl(var(--neutral-950) / 0.06), 0 1px 3px hsl(var(--neutral-950) / 0.08);
+    --shadow-lg: 0 12px 30px hsl(var(--neutral-950) / 0.18);
+}
+
+@media (prefers-color-scheme: dark) {
+    :root {
+        color-scheme: dark;
+        --background: var(--neutral-950);
+        --background-brand: var(--monta-500);
+        --background-brand-subtle: 197 70% 17%;
+        --background-neutral: 195 11% 17%;
+        --surface: var(--neutral-800);
+        --foreground: var(--neutral-25);
+        --foreground-brand: var(--monta-100);
+        --foreground-neutral: var(--neutral-300);
+        --primary: var(--monta-500);
+        --primary-hover: 197 100% 52%;
+        --primary-foreground: var(--neutral-950);
+        --secondary: 195 11% 29%;
+        --secondary-hover: 195 11% 35%;
+        --border: 195 10% 36%;
+        --border-strong: var(--neutral-300);
+        --border-brand: 197 80% 30%;
+        --ring: var(--monta-100);
+        --overlay: var(--base-1000);
+        --positive: 142 71% 50%;
+        --positive-subtle: 142 45% 24%;
+        --destructive: 0 72% 58%;
+        --destructive-foreground: var(--neutral-950);
+        --shadow-sm: 0 1px 3px hsl(var(--base-1000) / 0.24);
+        --shadow-lg: 0 12px 30px hsl(var(--base-1000) / 0.34);
+    }
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html {
+    background: hsl(var(--background));
+    font-family: var(--font-family-base);
+    min-width: 20rem;
+}
+
+body {
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: inherit;
+    font-size: 1rem;
+    line-height: 1.4;
+    margin: 0;
+    min-height: 100vh;
+    text-rendering: optimizeLegibility;
+}
+
+button,
+input,
+select,
+textarea {
+    font: inherit;
+}
+
+a,
+button {
+    -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+    outline: 0.125rem solid hsl(var(--ring));
+    outline-offset: 0.125rem;
+}
+
+h1,
+h2,
+h3,
+p {
+    overflow-wrap: break-word;
+}
+
+h1,
+h2,
+h3 {
+    color: hsl(var(--foreground));
+    font-weight: 600;
+}
+
+h1:focus {
+    outline: none;
+}
+
+::selection {
+    background: hsl(var(--background-brand-subtle));
+    color: hsl(var(--foreground));
+}
+
+.page-heading {
+    max-width: 48rem;
+}
+
+.page-heading h1 {
+    font-size: 2.5rem;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    margin: var(--space-8) 0 var(--space-12);
+}
+
+.page-heading p {
+    color: hsl(var(--foreground-neutral));
+    font-size: 1.125rem;
+    line-height: 1.5;
+    margin: 0;
+}
+
+.page-heading > a {
+    color: hsl(var(--foreground-brand));
+    display: inline-flex;
+    font-weight: 600;
+    margin-top: var(--space-24);
+}
+
+.eyebrow,
+.card-kicker {
+    color: hsl(var(--foreground-brand));
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.empty-state {
+    align-items: center;
+    background: hsl(var(--surface));
+    border: var(--border-width-md) dashed hsl(var(--border-strong));
+    border-radius: var(--radius-lg);
+    display: flex;
+    flex-direction: column;
+    margin-top: var(--space-40);
+    min-height: 22rem;
+    padding: var(--space-48) var(--space-24);
+    text-align: center;
+}
+
+.empty-icon {
+    align-items: center;
+    background: hsl(var(--background-brand-subtle));
+    border-radius: var(--radius-lg);
+    color: hsl(var(--foreground-brand));
+    display: inline-flex;
+    height: 4rem;
+    justify-content: center;
+    width: 4rem;
+}
+
+.empty-icon svg {
+    fill: none;
+    height: 2rem;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.6;
+    width: 2rem;
+}
+
+.empty-state h2 {
+    font-size: 1.25rem;
+    margin: var(--space-24) 0 var(--space-8);
+}
+
+.empty-state p {
+    color: hsl(var(--foreground-neutral));
+    line-height: 1.5;
+    margin: 0;
+    max-width: 32rem;
+}
+
+@media (max-width: 32rem) {
+    .page-heading h1 {
+        font-size: 2rem;
+    }
+}
