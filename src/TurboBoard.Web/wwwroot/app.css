@@ -37,7 +37,11 @@
     --overlay: var(--base-1000);
     --positive: 142 71% 35%;
     --positive-subtle: 142 55% 88%;
+    --warning: 38 92% 42%;
+    --warning-subtle: 38 85% 90%;
+    --warning-foreground: 32 92% 25%;
     --destructive: 0 72% 51%;
+    --destructive-subtle: 0 75% 94%;
     --destructive-foreground: var(--base-0);
     --space-0: 0;
     --space-2: 0.125rem;
@@ -81,7 +85,11 @@
         --overlay: var(--base-1000);
         --positive: 142 71% 50%;
         --positive-subtle: 142 45% 24%;
+        --warning: 38 92% 58%;
+        --warning-subtle: 32 45% 22%;
+        --warning-foreground: 38 92% 72%;
         --destructive: 0 72% 58%;
+        --destructive-subtle: 0 42% 22%;
         --destructive-foreground: var(--neutral-950);
         --shadow-sm: 0 1px 3px hsl(var(--base-1000) / 0.24);
         --shadow-lg: 0 12px 30px hsl(var(--base-1000) / 0.34);

@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.DataProtection;
 using TurboBoard.Persistence;
+using TurboBoard.SqlServer;
 using TurboBoard.Web.Components;
+using TurboBoard.Web.DataSources;
 using TurboBoard.Web.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -14,6 +16,8 @@ builder.Services
     .SetApplicationName("TurboBoard")
     .PersistKeysToFileSystem(new DirectoryInfo(statePaths.KeyRingDirectory));
 builder.Services.AddTurboBoardPersistence(statePaths.DatabasePath);
+builder.Services.AddSingleton<ISqlServerConnectionTester, SqlServerConnectionTester>();
+builder.Services.AddTurboBoardDataSources();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

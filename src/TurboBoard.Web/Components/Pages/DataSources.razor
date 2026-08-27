@@ -1,20 +1,377 @@
 @page "/data-sources"
+@rendermode InteractiveServer
+@implements IAsyncDisposable
+@inject IDataSourceService DataSourceService
 
 <PageTitle>Data Sources · TurboBoard</PageTitle>
 
-<section class="page-heading" aria-labelledby="data-sources-title">
-    <span class="eyebrow">Workspace</span>
-    <h1 id="data-sources-title">Data Sources</h1>
-    <p>Secure SQL database connections and their discovered Schema will be managed here.</p>
-</section>
+<header class="page-header">
+    <section class="page-heading" aria-labelledby="data-sources-title">
+        <span class="eyebrow">Workspace</span>
+        <h1 id="data-sources-title">Data Sources</h1>
+        <p>Manage the SQL Server databases TurboBoard can discover and query.</p>
+    </section>
+    <button class="button button-primary" type="button" @onclick="StartAdd" disabled="@IsBusy">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        Add Data Source
+    </button>
+</header>
 
-<section class="empty-state" aria-labelledby="data-sources-empty-title">
-    <span class="empty-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24">
-            <ellipse cx="12" cy="5" rx="8" ry="3" />
-            <path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7" />
-        </svg>
+<aside class="security-note" aria-label="Connection security">
+    <span class="security-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M12 3 5 6v5c0 4.6 2.9 8.8 7 10 4.1-1.2 7-5.4 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></svg>
     </span>
-    <h2 id="data-sources-empty-title">No Data Sources configured</h2>
-    <p>The workspace is ready. Connection management arrives in the next implementation slice.</p>
-</section>
+    <span>
+        <strong>Secure by default</strong>
+        Encrypted transport and certificate validation are enabled by default. Credentials stay on the server and are protected at rest.
+    </span>
+</aside>
+
+@if (pageError is not null)
+{
+    <div class="feedback feedback-error" role="alert">@pageError</div>
+}
+
+@if (isLoading)
+{
+    <section class="loading-state" aria-live="polite">Loading Data Sources…</section>
+}
+else if (dataSources.Count == 0)
+{
+    <section class="empty-state" aria-labelledby="data-sources-empty-title">
+        <span class="empty-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7" /></svg>
+        </span>
+        <h2 id="data-sources-empty-title">No Data Sources configured</h2>
+        <p>Add a read-only SQL Server configuration to begin Schema discovery.</p>
+        <button class="button button-secondary" type="button" @onclick="StartAdd">Add Data Source</button>
+    </section>
+}
+else
+{
+    <section class="data-source-grid" aria-label="Configured Data Sources">
+        @foreach (var source in dataSources)
+        {
+            <article class="data-source-card">
+                <div class="card-heading">
+                    <span class="database-mark" aria-hidden="true">
+                        <svg viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="8" ry="3" /><path d="M4 5v7c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12v7c0 1.7 3.6 3 8 3s8-1.3 8-3v-7" /></svg>
+                    </span>
+                    <span>
+                        <h2>@source.Name</h2>
+                        <span class="provider-badge">SQL Server</span>
+                    </span>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(source.Description))
+                {
+                    <p>@source.Description</p>
+                }
+                <dl>
+                    <div><dt>Target</dt><dd>@source.Target</dd></div>
+                    <div><dt>Configuration</dt><dd>@(source.Mode == SqlServerConnectionMode.Structured ? "Structured settings" : "Advanced mode")</dd></div>
+                </dl>
+                @if (source.TrustServerCertificate)
+                {
+                    <span class="warning-badge">Certificate trust override</span>
+                }
+                <div class="card-actions">
+                    <button class="button button-secondary button-small" type="button" @onclick="() => StartEditAsync(source.Id)" disabled="@IsBusy">Edit</button>
+                    <button class="button button-tertiary button-small" type="button" @onclick="() => RequestDelete(source.Id)" disabled="@IsBusy">Delete</button>
+                </div>
+                @if (deleteCandidateId == source.Id)
+                {
+                    <div class="delete-confirmation" role="alert">
+                        <strong>Delete @source.Name?</strong>
+                        <span>This removes its protected configuration.</span>
+                        <div>
+                            <button class="button button-destructive button-small" type="button" @onclick="() => DeleteAsync(source.Id)">Delete</button>
+                            <button class="button button-tertiary button-small" type="button" @onclick="CancelDelete">Keep Data Source</button>
+                        </div>
+                    </div>
+                }
+            </article>
+        }
+    </section>
+}
+
+@if (draft is not null)
+{
+    <section class="editor-panel" aria-labelledby="editor-title">
+        <div class="editor-heading">
+            <span>
+                <span class="eyebrow">@(editingId is null ? "New configuration" : "Edit configuration")</span>
+                <h2 id="editor-title">@(editingId is null ? "Add a SQL Server Data Source" : $"Edit {draft.Name}")</h2>
+            </span>
+            <button class="icon-button" type="button" aria-label="Close editor" @onclick="CloseEditor" disabled="@IsBusy">×</button>
+        </div>
+
+        <EditForm Model="draft" OnSubmit="SaveAsync" FormName="data-source-editor">
+            <div class="form-section">
+                <h3>Identity</h3>
+                <div class="form-grid">
+                    <label class="field">
+                        <span>Name <strong aria-hidden="true">*</strong></span>
+                        <input @bind="draft.Name" @bind:event="oninput" maxlength="200" autocomplete="off" />
+                    </label>
+                    <label class="field field-wide">
+                        <span>Description</span>
+                        <textarea @bind="draft.Description" @bind:event="oninput" maxlength="2000" rows="3"></textarea>
+                    </label>
+                </div>
+            </div>
+
+            <div class="form-section">
+                <h3>Connection mode</h3>
+                <InputRadioGroup @bind-Value="draft.Mode" Name="connection-mode" class="mode-options">
+                    <label class="mode-option">
+                        <InputRadio Value="SqlServerConnectionMode.Structured" />
+                        <span><strong>Structured settings</strong><small>Recommended for standard SQL Server deployments.</small></span>
+                    </label>
+                    <label class="mode-option">
+                        <InputRadio Value="SqlServerConnectionMode.Advanced" />
+                        <span><strong>Advanced connection string</strong><small>For settings unavailable in the structured editor.</small></span>
+                    </label>
+                </InputRadioGroup>
+            </div>
+
+            @if (draft.Mode == SqlServerConnectionMode.Structured)
+            {
+                <div class="form-section">
+                    <h3>SQL Server settings</h3>
+                    <div class="form-grid">
+                        <label class="field">
+                            <span>Server or instance <strong aria-hidden="true">*</strong></span>
+                            <input @bind="draft.Server" @bind:event="oninput" autocomplete="off" placeholder="sql.example.internal" />
+                        </label>
+                        <label class="field">
+                            <span>Database <strong aria-hidden="true">*</strong></span>
+                            <input @bind="draft.Database" @bind:event="oninput" autocomplete="off" placeholder="Analytics" />
+                        </label>
+                    </div>
+                    <label class="check-field">
+                        <InputCheckbox @bind-Value="draft.UseIntegratedSecurity" />
+                        <span><strong>Use Windows integrated security</strong><small>Use the identity running TurboBoard instead of a SQL login.</small></span>
+                    </label>
+                    @if (!draft.UseIntegratedSecurity)
+                    {
+                        <div class="form-grid credentials-grid">
+                            <label class="field">
+                                <span>Login name <strong aria-hidden="true">*</strong></span>
+                                <input @bind="draft.UserName" @bind:event="oninput" autocomplete="username" />
+                            </label>
+                            <label class="field">
+                                <span>Password <strong aria-hidden="true">*</strong></span>
+                                <input type="password" @bind="draft.Password" @bind:event="oninput" autocomplete="new-password" />
+                                @if (hasStoredSecret)
+                                {
+                                    <small>Leave empty to keep the saved password.</small>
+                                }
+                            </label>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div class="form-section">
+                    <h3>Advanced settings</h3>
+                    <label class="field">
+                        <span>Connection string <strong aria-hidden="true">*</strong></span>
+                        <textarea class="secret-input" @bind="draft.ConnectionString" @bind:event="oninput" rows="5" autocomplete="off" spellcheck="false"></textarea>
+                        <small>@(hasStoredSecret ? "The saved connection string is not shown. Leave empty to keep it." : "The complete value is encrypted before it is saved.")</small>
+                    </label>
+                </div>
+            }
+
+            <details class="advanced-options" open="@draft.TrustServerCertificate">
+                <summary>Advanced security options</summary>
+                <label class="check-field warning-option">
+                    <InputCheckbox @bind-Value="draft.TrustServerCertificate" />
+                    <span>
+                        <strong>Trust the server certificate without validation</strong>
+                        <small>Warning: this weakens identity verification. Use only for a server you trust while its certificate is repaired.</small>
+                    </span>
+                </label>
+            </details>
+
+            @if (diagnostics.Count > 0)
+            {
+                <div class="feedback feedback-error" role="alert">
+                    <strong>Review these settings</strong>
+                    <ul>@foreach (var diagnostic in diagnostics) { <li>@diagnostic</li> }</ul>
+                </div>
+            }
+
+            @if (testResult is not null)
+            {
+                <div class="feedback @TestFeedbackClass" role="status" aria-live="polite">
+                    <strong>@TestFeedbackTitle</strong><span>@testResult.Message</span>
+                </div>
+            }
+
+            <div class="form-actions">
+                <button class="button button-secondary" type="button" @onclick="TestConnectionAsync" disabled="@IsBusy">@(isTesting ? "Testing…" : "Test Connection")</button>
+                @if (isTesting)
+                {
+                    <button class="button button-tertiary" type="button" @onclick="CancelConnectionTest">Cancel test</button>
+                }
+                <span class="action-spacer"></span>
+                <button class="button button-tertiary" type="button" @onclick="CloseEditor" disabled="@IsBusy">Cancel</button>
+                <button class="button button-primary" type="submit" disabled="@IsBusy">@(isSaving ? "Saving…" : "Save Data Source")</button>
+            </div>
+        </EditForm>
+    </section>
+}
+
+@code {
+    private readonly List<DataSourceSummary> dataSources = [];
+    private readonly List<string> diagnostics = [];
+    private CancellationTokenSource? connectionTestCancellation;
+    private DataSourceDraft? draft;
+    private Guid? editingId;
+    private Guid? deleteCandidateId;
+    private SqlServerConnectionTestResult? testResult;
+    private string? pageError;
+    private bool hasStoredSecret;
+    private bool isLoading = true;
+    private bool isSaving;
+    private bool isTesting;
+
+    private bool IsBusy => isSaving || isTesting;
+    private string TestFeedbackClass => testResult?.Status == SqlServerConnectionTestStatus.Succeeded ? "feedback-success" : testResult?.Status == SqlServerConnectionTestStatus.Cancelled ? "feedback-neutral" : "feedback-error";
+    private string TestFeedbackTitle => testResult?.Status == SqlServerConnectionTestStatus.Succeeded ? "Connection verified" : testResult?.Status == SqlServerConnectionTestStatus.Cancelled ? "Test cancelled" : "Connection not verified";
+
+    protected override async Task OnInitializedAsync() => await RefreshAsync();
+
+    private async Task RefreshAsync()
+    {
+        isLoading = true;
+        pageError = null;
+        try
+        {
+            dataSources.Clear();
+            dataSources.AddRange(await DataSourceService.ListAsync());
+        }
+        catch (InvalidOperationException)
+        {
+            pageError = "TurboBoard could not read the protected Data Source configuration. Verify the application key ring.";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private void StartAdd()
+    {
+        editingId = null;
+        hasStoredSecret = false;
+        draft = new DataSourceDraft();
+        ResetFeedback();
+    }
+
+    private async Task StartEditAsync(Guid id)
+    {
+        ResetFeedback();
+        var details = await DataSourceService.GetAsync(id);
+        if (details is null)
+        {
+            pageError = "That Data Source no longer exists.";
+            await RefreshAsync();
+            return;
+        }
+
+        editingId = id;
+        hasStoredSecret = details.HasStoredSecret;
+        draft = new DataSourceDraft
+        {
+            Name = details.Name,
+            Description = details.Description,
+            Mode = details.Mode,
+            Server = details.Server,
+            Database = details.Database,
+            UseIntegratedSecurity = details.UseIntegratedSecurity,
+            UserName = details.UserName,
+            TrustServerCertificate = details.TrustServerCertificate,
+        };
+    }
+
+    private async Task SaveAsync(EditContext editContext)
+    {
+        if (draft is null) return;
+        diagnostics.Clear();
+        testResult = null;
+        isSaving = true;
+        try
+        {
+            _ = await DataSourceService.SaveAsync(editingId, draft);
+            CloseEditor();
+            await RefreshAsync();
+        }
+        catch (DataSourceValidationException exception)
+        {
+            diagnostics.AddRange(exception.Diagnostics);
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private async Task TestConnectionAsync()
+    {
+        if (draft is null) return;
+        diagnostics.Clear();
+        testResult = null;
+        isTesting = true;
+        connectionTestCancellation?.Dispose();
+        connectionTestCancellation = new CancellationTokenSource();
+        try
+        {
+            testResult = await DataSourceService.TestAsync(editingId, draft, connectionTestCancellation.Token);
+        }
+        catch (DataSourceValidationException exception)
+        {
+            diagnostics.AddRange(exception.Diagnostics);
+        }
+        finally
+        {
+            isTesting = false;
+        }
+    }
+
+    private void CancelConnectionTest() => connectionTestCancellation?.Cancel();
+    private void RequestDelete(Guid id) => deleteCandidateId = id;
+    private void CancelDelete() => deleteCandidateId = null;
+
+    private async Task DeleteAsync(Guid id)
+    {
+        _ = await DataSourceService.DeleteAsync(id);
+        deleteCandidateId = null;
+        if (editingId == id) CloseEditor();
+        await RefreshAsync();
+    }
+
+    private void CloseEditor()
+    {
+        connectionTestCancellation?.Cancel();
+        editingId = null;
+        draft = null;
+        hasStoredSecret = false;
+        ResetFeedback();
+    }
+
+    private void ResetFeedback()
+    {
+        diagnostics.Clear();
+        testResult = null;
+        pageError = null;
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        connectionTestCancellation?.Cancel();
+        connectionTestCancellation?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

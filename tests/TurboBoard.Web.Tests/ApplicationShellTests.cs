@@ -29,6 +29,8 @@ public sealed class ApplicationShellTests
         var dataSourcesHtml = await dataSources.Content.ReadAsStringAsync();
         Assert.Equal(HttpStatusCode.OK, dataSources.StatusCode);
         Assert.Contains("Data Sources", dataSourcesHtml, StringComparison.Ordinal);
+        Assert.Contains("Add Data Source", dataSourcesHtml, StringComparison.Ordinal);
+        Assert.Contains("Encrypted transport and certificate validation are enabled by default", dataSourcesHtml, StringComparison.Ordinal);
 
         var queries = await client.GetAsync("/queries");
         var queriesHtml = await queries.Content.ReadAsStringAsync();
