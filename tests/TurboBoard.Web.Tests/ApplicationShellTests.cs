@@ -53,6 +53,11 @@ public sealed class ApplicationShellTests
         Assert.Contains("Queries", queriesHtml, StringComparison.Ordinal);
         Assert.Contains("Run preview", queriesHtml, StringComparison.Ordinal);
         Assert.Contains("Choose a Data Source", queriesHtml, StringComparison.Ordinal);
+        Assert.Contains("Save As", queriesHtml, StringComparison.Ordinal);
+        Assert.Contains("Reset", queriesHtml, StringComparison.Ordinal);
+        Assert.Contains("Duplicate", queriesHtml, StringComparison.Ordinal);
+        Assert.Contains("Delete", queriesHtml, StringComparison.Ordinal);
+        Assert.Contains("unsaved changes", queriesHtml, StringComparison.OrdinalIgnoreCase);
 
         Assert.True(File.Exists(Path.Combine(stateDirectory.Path, "turboboard.db")));
         Assert.True(Directory.Exists(Path.Combine(stateDirectory.Path, "keys")));

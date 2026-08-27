@@ -6,6 +6,8 @@ public static class QueryServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddScoped<IQueryPreviewService, QueryPreviewService>();
+        services.AddSingleton<IQueryDefinitionSerializer, QueryDefinitionSerializer>();
+        services.AddScoped<ISavedQueryService, SavedQueryService>();
         return services;
     }
 }

@@ -9,6 +9,8 @@ public sealed class TurboBoardDbContext(DbContextOptions<TurboBoardDbContext> op
 
     public DbSet<SchemaSnapshotRecord> SchemaSnapshots => Set<SchemaSnapshotRecord>();
 
+    public DbSet<SavedQueryRecord> SavedQueries => Set<SavedQueryRecord>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         var dataSource = modelBuilder.Entity<DataSourceRecord>();
@@ -33,5 +35,19 @@ public sealed class TurboBoardDbContext(DbContextOptions<TurboBoardDbContext> op
             .WithOne()
             .HasForeignKey<SchemaSnapshotRecord>(item => item.DataSourceId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        var savedQuery = modelBuilder.Entity<SavedQueryRecord>();
+        savedQuery.ToTable("SavedQueries");
+        savedQuery.HasKey(item => item.Id);
+        savedQuery.Property(item => item.Id).ValueGeneratedNever();
+        savedQuery.Property(item => item.DataSourceId).IsRequired();
+        savedQuery.Property(item => item.Name).HasMaxLength(200).IsRequired();
+        savedQuery.Property(item => item.Description).HasMaxLength(2000).IsRequired();
+        savedQuery.Property(item => item.DefinitionJson).IsRequired();
+        savedQuery.HasOne<DataSourceRecord>()
+            .WithMany()
+            .HasForeignKey(item => item.DataSourceId)
+            .OnDelete(DeleteBehavior.Cascade);
+        savedQuery.HasIndex(item => new { item.DataSourceId, item.Name });
     }
 }

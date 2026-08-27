@@ -3,8 +3,11 @@
 @inject IDataSourceService DataSourceService
 @inject ISchemaService SchemaService
 @inject IQueryPreviewService PreviewService
+@inject ISavedQueryService SavedQueryService
+@inject IJSRuntime JS
 
 <PageTitle>Queries · TurboBoard</PageTitle>
+<NavigationLock ConfirmExternalNavigation="@isDirty" OnBeforeInternalNavigation="ConfirmInternalNavigation" />
 
 <header class="page-header">
     <section class="page-heading" aria-labelledby="queries-title">
@@ -12,8 +15,19 @@
         <h1 id="queries-title">Queries</h1>
         <p>Choose a Schema-known source and fields, then run a bounded Query Preview without writing SQL.</p>
     </section>
-    <button class="button button-primary" type="button" @onclick="PreviewAsync" disabled="@(isPreviewing || selections.Count == 0)">@(isPreviewing ? "Running preview…" : "Run preview")</button>
+    <div class="query-actions"><button class="button button-secondary" type="button" @onclick="ResetAsync" disabled="@(!isDirty)">Reset</button><button class="button button-secondary" type="button" @onclick="SaveAsAsync" disabled="@(!CanSaveDefinition)">Save As</button><button class="button button-primary" type="button" @onclick="SaveAsync" disabled="@(!CanSaveDefinition && !CanSaveMetadata)">Save</button><button class="button button-primary" type="button" @onclick="PreviewAsync" disabled="@(isPreviewing || selections.Count == 0)">@(isPreviewing ? "Running preview…" : "Run preview")</button></div>
 </header>
+
+<section class="saved-query-bar" aria-label="Saved Query commands">
+    <label><span>Saved Query</span><select value="@selectedSavedQueryId" @onchange="OpenSavedQueryAsync"><option value="">New Query Definition</option>@foreach (var item in savedQueries) { <option value="@item.Id">@item.Name</option> }</select></label>
+    <label><span>Name</span><input value="@queryName" @oninput="ChangeName" maxlength="200" /></label>
+    <label><span>Description</span><input value="@queryDescription" @oninput="ChangeDescription" maxlength="2000" /></label>
+    <div class="query-actions"><button class="button button-secondary" type="button" @onclick="DuplicateAsync" disabled="@(selectedSavedQueryId is null)">Duplicate</button><button class="button button-destructive" type="button" @onclick="DeleteAsync" disabled="@(selectedSavedQueryId is null)">Delete</button></div>
+</section>
+<p class="muted">Meaningful unsaved changes trigger a navigation warning where browser support permits.</p>
+@if (isDirty) { <p class="inline-warning" role="status">You have unsaved changes. Save or Reset before leaving this page.</p> }
+@if (saveDiagnostic is not null) { <section class="feedback feedback-error" role="alert"><h2>Saved Query needs attention</h2><p><code>@saveDiagnostic.Code</code> @saveDiagnostic.Message</p></section> }
+@if (!string.IsNullOrEmpty(commandMessage)) { <p class="feedback feedback-success" role="status">@commandMessage</p> }
 
 <section class="query-editor" aria-label="Query Definition editor">
     <div class="editor-card"><h2>1. Data Source</h2><label><span>Data Source</span><select value="@selectedDataSourceId" @onchange="ChangeDataSourceAsync"><option value="">Choose a Data Source</option>@foreach (var item in dataSources) { <option value="@item.Id">@item.Name</option> }</select></label>
@@ -29,7 +43,7 @@
         @for (var index = 0; index < selections.Count; index++)
         {
             var position = index; var selection = selections[position];
-            <div class="selection-row" @key="selection.ColumnName"><span class="drag-index">@(position + 1)</span><strong>@selection.ColumnName</strong><label><span>Output name</span><input value="@selection.OutputName" @oninput="args => selection.OutputName = args.Value?.ToString() ?? string.Empty" /></label><div class="row-actions"><button type="button" aria-label="Move @selection.ColumnName up" disabled="@(position == 0)" @onclick="() => Move(position, -1)">↑</button><button type="button" aria-label="Move @selection.ColumnName down" disabled="@(position == selections.Count - 1)" @onclick="() => Move(position, 1)">↓</button><button type="button" aria-label="Remove @selection.ColumnName" @onclick="() => Remove(position)">×</button></div></div>
+            <div class="selection-row" @key="selection.ColumnName"><span class="drag-index">@(position + 1)</span><strong>@selection.ColumnName</strong><label><span>Output name</span><input value="@selection.OutputName" @oninput="args => ChangeOutputName(selection, args)" /></label><div class="row-actions"><button type="button" aria-label="Move @selection.ColumnName up" disabled="@(position == 0)" @onclick="() => Move(position, -1)">↑</button><button type="button" aria-label="Move @selection.ColumnName down" disabled="@(position == selections.Count - 1)" @onclick="() => Move(position, 1)">↓</button><button type="button" aria-label="Remove @selection.ColumnName" @onclick="() => Remove(position)">×</button></div></div>
         }
     </div>
 </section>
@@ -49,6 +63,13 @@ else if (preview?.Status == QueryPreviewStatus.Failed) { <section class="feedbac
 
 @code {
     private IReadOnlyList<DataSourceSummary> dataSources = [];
+    private IReadOnlyList<SavedQuerySummary> savedQueries = [];
+    private Guid? selectedSavedQueryId;
+    private string queryName = string.Empty;
+    private string queryDescription = string.Empty;
+    private bool isDirty;
+    private ValidationDiagnostic? saveDiagnostic;
+    private string? commandMessage;
     private Guid? selectedDataSourceId;
     private DataSourceSchema? schema;
     private string selectedObjectName = string.Empty;
@@ -57,15 +78,32 @@ else if (preview?.Status == QueryPreviewStatus.Failed) { <section class="feedbac
     private QueryPreviewResponse? preview;
     private bool isPreviewing;
     private SchemaDatabaseObject? SelectedObject => schema?.Objects.SingleOrDefault(item => item.QualifiedName.DisplayName == selectedObjectName);
+    private bool CanSaveDefinition => selectedDataSourceId is not null && SelectedObject is not null && selections.Count > 0 && !string.IsNullOrWhiteSpace(queryName) && saveDiagnostic is null;
+    private bool CanSaveMetadata => selectedSavedQueryId is not null && saveDiagnostic is not null && !string.IsNullOrWhiteSpace(queryName);
     protected override async Task OnInitializedAsync() => dataSources = await DataSourceService.ListAsync();
-    private async Task ChangeDataSourceAsync(ChangeEventArgs args) { selectedDataSourceId = Guid.TryParse(args.Value?.ToString(), out var id) ? id : null; schema = selectedDataSourceId is null ? null : await SchemaService.GetAsync(selectedDataSourceId.Value); ResetSource(); }
-    private void ChangeObject(ChangeEventArgs args) { selectedObjectName = args.Value?.ToString() ?? string.Empty; sourceId = Guid.NewGuid(); selections.Clear(); preview = null; }
+    private async Task ChangeDataSourceAsync(ChangeEventArgs args) { if (!await ConfirmDiscardAsync()) return; selectedDataSourceId = Guid.TryParse(args.Value?.ToString(), out var id) ? id : null; schema = selectedDataSourceId is null ? null : await SchemaService.GetAsync(selectedDataSourceId.Value); savedQueries = selectedDataSourceId is null ? [] : await SavedQueryService.ListAsync(selectedDataSourceId.Value); selectedSavedQueryId = null; queryName = string.Empty; queryDescription = string.Empty; ResetSource(); MarkDirty(); }
+    private void ChangeObject(ChangeEventArgs args) { selectedObjectName = args.Value?.ToString() ?? string.Empty; sourceId = Guid.NewGuid(); selections.Clear(); preview = null; MarkDirty(); }
     private void ResetSource() { selectedObjectName = string.Empty; sourceId = Guid.NewGuid(); selections.Clear(); preview = null; }
     private bool IsSelected(string columnName) => selections.Any(item => item.ColumnName == columnName);
-    private void ToggleColumn(SchemaColumn column, bool selected) { if (selected && !IsSelected(column.Name)) selections.Add(new(column.Name, SafeOutputName(column.Name))); if (!selected) selections.RemoveAll(item => item.ColumnName == column.Name); }
-    private void Move(int index, int offset) { var item = selections[index]; selections.RemoveAt(index); selections.Insert(index + offset, item); }
-    private void Remove(int index) => selections.RemoveAt(index);
+    private void ToggleColumn(SchemaColumn column, bool selected) { if (selected && !IsSelected(column.Name)) selections.Add(new(column.Name, SafeOutputName(column.Name))); if (!selected) selections.RemoveAll(item => item.ColumnName == column.Name); MarkDirty(); }
+    private void Move(int index, int offset) { var item = selections[index]; selections.RemoveAt(index); selections.Insert(index + offset, item); MarkDirty(); }
+    private void Remove(int index) { selections.RemoveAt(index); MarkDirty(); }
     private async Task PreviewAsync() { if (selectedDataSourceId is null || SelectedObject is null) return; isPreviewing = true; try { var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, SelectedObject.QualifiedName), selections.Select(item => new QuerySelection(sourceId, item.ColumnName, item.OutputName)).ToArray()); preview = await PreviewService.PreviewAsync(selectedDataSourceId.Value, definition); } finally { isPreviewing = false; } }
+    private void ChangeName(ChangeEventArgs args) { queryName = args.Value?.ToString() ?? string.Empty; MarkDirty(); }
+    private void ChangeDescription(ChangeEventArgs args) { queryDescription = args.Value?.ToString() ?? string.Empty; MarkDirty(); }
+    private void ChangeOutputName(EditorSelection selection, ChangeEventArgs args) { selection.OutputName = args.Value?.ToString() ?? string.Empty; MarkDirty(); }
+    private void MarkDirty() { isDirty = true; commandMessage = null; }
+    private QueryDefinition? CurrentDefinition() => selectedDataSourceId is null || SelectedObject is null ? null : new(QueryDefinition.CurrentVersion, new(sourceId, SelectedObject.QualifiedName), selections.Select(item => new QuerySelection(sourceId, item.ColumnName, item.OutputName)).ToArray());
+    private async Task SaveAsync() { if (CanSaveMetadata && selectedSavedQueryId is Guid id) { await SavedQueryService.UpdateMetadataAsync(id, queryName, queryDescription); savedQueries = await SavedQueryService.ListAsync(selectedDataSourceId!.Value); isDirty = false; commandMessage = "Saved Query metadata updated."; return; } await PersistAsync(selectedSavedQueryId); }
+    private async Task SaveAsAsync() => await PersistAsync(null);
+    private async Task PersistAsync(Guid? id) { var definition = CurrentDefinition(); if (selectedDataSourceId is null || definition is null) return; try { selectedSavedQueryId = await SavedQueryService.SaveAsync(id, new(selectedDataSourceId.Value, queryName, queryDescription, definition)); savedQueries = await SavedQueryService.ListAsync(selectedDataSourceId.Value); isDirty = false; saveDiagnostic = null; commandMessage = id is null ? "Saved as a new Saved Query." : "Saved Query updated."; } catch (SavedQueryValidationException exception) { saveDiagnostic = new("query.saved.invalid", string.Join(" ", exception.Diagnostics)); } }
+    private async Task OpenSavedQueryAsync(ChangeEventArgs args) { if (!await ConfirmDiscardAsync()) return; if (!Guid.TryParse(args.Value?.ToString(), out var id)) { selectedSavedQueryId = null; return; } await LoadSavedQueryAsync(id); }
+    private async Task LoadSavedQueryAsync(Guid id) { var saved = await SavedQueryService.GetAsync(id); if (saved is null) return; selectedSavedQueryId = saved.Id; selectedDataSourceId = saved.DataSourceId; schema = await SchemaService.GetAsync(saved.DataSourceId); savedQueries = await SavedQueryService.ListAsync(saved.DataSourceId); queryName = saved.Name; queryDescription = saved.Description; saveDiagnostic = saved.Diagnostic; preview = null; selections.Clear(); if (saved.Definition is not null) { sourceId = saved.Definition.Source.Id; selectedObjectName = saved.Definition.Source.Object.DisplayName; selections.AddRange(saved.Definition.Selections.Select(item => new EditorSelection(item.ColumnName, item.OutputName))); } else { selectedObjectName = string.Empty; sourceId = Guid.NewGuid(); } isDirty = false; commandMessage = null; }
+    private async Task ResetAsync() { if (selectedSavedQueryId is Guid id) await LoadSavedQueryAsync(id); else { queryName = string.Empty; queryDescription = string.Empty; ResetSource(); isDirty = false; saveDiagnostic = null; commandMessage = "Unsaved changes reset."; } }
+    private async Task DuplicateAsync() { if (selectedSavedQueryId is not Guid id) return; var duplicateId = await SavedQueryService.DuplicateAsync(id, $"{queryName} copy"); await LoadSavedQueryAsync(duplicateId); commandMessage = "Saved Query duplicated."; }
+    private async Task DeleteAsync() { if (selectedSavedQueryId is not Guid id || selectedDataSourceId is null) return; await SavedQueryService.DeleteAsync(id); savedQueries = await SavedQueryService.ListAsync(selectedDataSourceId.Value); selectedSavedQueryId = null; queryName = string.Empty; queryDescription = string.Empty; ResetSource(); isDirty = false; saveDiagnostic = null; commandMessage = "Saved Query deleted."; }
+    private async Task ConfirmInternalNavigation(LocationChangingContext context) { if (isDirty && !await JS.InvokeAsync<bool>("confirm", "You have unsaved changes. Leave this page and discard them?")) context.PreventNavigation(); }
+    private async Task<bool> ConfirmDiscardAsync() => !isDirty || await JS.InvokeAsync<bool>("confirm", "You have unsaved changes. Discard them and open another Query Definition?");
     private static string SafeOutputName(string name) { var candidate = new string(name.Select(character => char.IsLetterOrDigit(character) || character == '_' ? character : '_').ToArray()); return candidate.Length > 0 && char.IsDigit(candidate[0]) ? $"_{candidate}" : candidate; }
     private static string FormatValue(object? value) => value switch { null => "NULL", DateTime dateTime => dateTime.ToString("u"), DateTimeOffset offset => offset.ToString("u"), byte[] bytes => $"{bytes.Length} bytes", _ => Convert.ToString(value, System.Globalization.CultureInfo.CurrentCulture) ?? string.Empty };
     private sealed class EditorSelection(string columnName, string outputName) { public string ColumnName { get; } = columnName; public string OutputName { get; set; } = outputName; }

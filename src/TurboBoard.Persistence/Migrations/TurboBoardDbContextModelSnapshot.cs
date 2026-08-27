@@ -81,6 +81,50 @@ public sealed class TurboBoardDbContextModelSnapshot : ModelSnapshot
             entity.ToTable("SchemaSnapshots", (string?)null);
         });
 
+        modelBuilder.Entity("TurboBoard.Persistence.SavedQueryRecord", entity =>
+        {
+            entity.Property<Guid>("Id")
+                .HasColumnType("TEXT");
+
+            entity.Property<DateTimeOffset>("CreatedAtUtc")
+                .HasColumnType("TEXT");
+
+            entity.Property<Guid>("DataSourceId")
+                .HasColumnType("TEXT");
+
+            entity.Property<string>("DefinitionJson")
+                .IsRequired()
+                .HasColumnType("TEXT");
+
+            entity.Property<string>("Description")
+                .IsRequired()
+                .HasMaxLength(2000)
+                .HasColumnType("TEXT");
+
+            entity.Property<string>("Name")
+                .IsRequired()
+                .HasMaxLength(200)
+                .HasColumnType("TEXT");
+
+            entity.Property<DateTimeOffset>("UpdatedAtUtc")
+                .HasColumnType("TEXT");
+
+            entity.HasKey("Id");
+
+            entity.HasIndex("DataSourceId", "Name");
+
+            entity.ToTable("SavedQueries", (string?)null);
+        });
+
+        modelBuilder.Entity("TurboBoard.Persistence.SavedQueryRecord", entity =>
+        {
+            entity.HasOne("TurboBoard.Persistence.DataSourceRecord", null)
+                .WithMany()
+                .HasForeignKey("DataSourceId")
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
+
         modelBuilder.Entity("TurboBoard.Persistence.SchemaSnapshotRecord", entity =>
         {
             entity.HasOne("TurboBoard.Persistence.DataSourceRecord", null)
