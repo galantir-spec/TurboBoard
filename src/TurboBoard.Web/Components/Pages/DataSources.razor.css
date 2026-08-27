@@ -324,7 +324,7 @@
 .field ::deep input,
 .field ::deep textarea {
     background: hsl(var(--background));
-    border: var(--border-width-md) solid hsl(var(--border-strong));
+    border: var(--border-width-md) solid hsl(var(--border-input));
     border-radius: var(--radius-md);
     color: hsl(var(--foreground));
     font: inherit;

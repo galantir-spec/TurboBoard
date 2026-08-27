@@ -32,6 +32,7 @@
     --secondary: var(--neutral-50);
     --secondary-hover: var(--neutral-100);
     --border: var(--neutral-100);
+    --border-input: 195 8% 52%;
     --border-strong: var(--neutral-300);
     --border-brand: var(--monta-100);
     --ring: var(--monta-700);
@@ -84,6 +85,7 @@
         --secondary: 195 11% 29%;
         --secondary-hover: 195 11% 35%;
         --border: 195 10% 36%;
+        --border-input: var(--neutral-300);
         --border-strong: var(--neutral-300);
         --border-brand: 197 80% 30%;
         --ring: var(--monta-100);
