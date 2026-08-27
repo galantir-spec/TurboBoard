@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using TurboBoard.Core.DataSources;
 using TurboBoard.Core.Schemas;
+using TurboBoard.Core.Queries;
 
 namespace TurboBoard.SqlServer;
 
@@ -12,6 +13,8 @@ public static class SqlServerServiceCollectionExtensions
         services.AddSingleton<IDataSourceConnectionTester, SqlServerConnectionTester>();
         services.AddSingleton<ISqlServerCatalogReader, SqlServerCatalogReader>();
         services.AddSingleton<IDataSourceSchemaDiscoverer, SqlServerSchemaDiscoverer>();
+        services.AddSingleton<IQueryCompiler, SqlServerQueryCompiler>();
+        services.AddSingleton<IQueryExecutor, SqlServerQueryExecutor>();
         return services;
     }
 }

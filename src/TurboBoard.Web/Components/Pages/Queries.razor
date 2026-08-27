@@ -1,19 +1,72 @@
 @page "/queries"
+@rendermode InteractiveServer
+@inject IDataSourceService DataSourceService
+@inject ISchemaService SchemaService
+@inject IQueryPreviewService PreviewService
 
 <PageTitle>Queries · TurboBoard</PageTitle>
 
-<section class="page-heading" aria-labelledby="queries-title">
-    <span class="eyebrow">Workspace</span>
-    <h1 id="queries-title">Queries</h1>
-    <p>Visual Query Definitions and their bounded previews will be managed here.</p>
+<header class="page-header">
+    <section class="page-heading" aria-labelledby="queries-title">
+        <span class="eyebrow">Visual query workspace</span>
+        <h1 id="queries-title">Queries</h1>
+        <p>Choose a Schema-known source and fields, then run a bounded Query Preview without writing SQL.</p>
+    </section>
+    <button class="button button-primary" type="button" @onclick="PreviewAsync" disabled="@(isPreviewing || selections.Count == 0)">@(isPreviewing ? "Running preview…" : "Run preview")</button>
+</header>
+
+<section class="query-editor" aria-label="Query Definition editor">
+    <div class="editor-card"><h2>1. Data Source</h2><label><span>Data Source</span><select value="@selectedDataSourceId" @onchange="ChangeDataSourceAsync"><option value="">Choose a Data Source</option>@foreach (var item in dataSources) { <option value="@item.Id">@item.Name</option> }</select></label>
+        @if (selectedDataSourceId is not null && schema is null) { <p class="inline-warning">Discover a Schema for this Data Source before building a query.</p> }
+    </div>
+    <div class="editor-card"><h2>2. Source</h2><label><span>Table or view</span><select value="@selectedObjectName" @onchange="ChangeObject"><option value="">Choose a table or view</option>@foreach (var item in schema?.Objects ?? []) { <option value="@item.QualifiedName.DisplayName">@item.QualifiedName.DisplayName · @item.Kind</option> }</select></label></div>
+    <div class="editor-card field-card"><h2>3. Fields</h2>
+        @if (SelectedObject is null) { <p class="muted">Choose a source to see selectable fields.</p> }
+        else { <div class="field-picker">@foreach (var column in SelectedObject.Columns.Where(item => item.Capabilities.HasFlag(SchemaColumnCapabilities.Select))) { <label class="field-option"><input type="checkbox" checked="@IsSelected(column.Name)" @onchange="args => ToggleColumn(column, (bool?)args.Value == true)" /><span><strong>@column.Name</strong><small>@column.NormalizedType · @column.ProviderType</small></span></label> }</div> }
+    </div>
+    <div class="editor-card selection-card"><h2>4. Output</h2>
+        @if (selections.Count == 0) { <p class="muted">Selected fields appear here in output order.</p> }
+        @for (var index = 0; index < selections.Count; index++)
+        {
+            var position = index; var selection = selections[position];
+            <div class="selection-row" @key="selection.ColumnName"><span class="drag-index">@(position + 1)</span><strong>@selection.ColumnName</strong><label><span>Output name</span><input value="@selection.OutputName" @oninput="args => selection.OutputName = args.Value?.ToString() ?? string.Empty" /></label><div class="row-actions"><button type="button" aria-label="Move @selection.ColumnName up" disabled="@(position == 0)" @onclick="() => Move(position, -1)">↑</button><button type="button" aria-label="Move @selection.ColumnName down" disabled="@(position == selections.Count - 1)" @onclick="() => Move(position, 1)">↓</button><button type="button" aria-label="Remove @selection.ColumnName" @onclick="() => Remove(position)">×</button></div></div>
+        }
+    </div>
 </section>
 
-<section class="empty-state" aria-labelledby="queries-empty-title">
-    <span class="empty-icon" aria-hidden="true">
-        <svg viewBox="0 0 24 24">
-            <path d="M4 4h16v16H4zM8 9h8M8 13h5M8 17h7" />
-        </svg>
-    </span>
-    <h2 id="queries-empty-title">No Saved Queries yet</h2>
-    <p>Connect a Data Source first, then build a safe Query Definition without writing SQL.</p>
-</section>
+@if (preview?.Diagnostics.Count > 0) { <section class="feedback feedback-error" role="alert" aria-labelledby="validation-title"><h2 id="validation-title">Query Definition needs attention</h2><ul>@foreach (var diagnostic in preview.Diagnostics) { <li><code>@diagnostic.Code</code> @diagnostic.Message</li> }</ul></section> }
+else if (preview?.Status == QueryPreviewStatus.Failed) { <section class="feedback feedback-error" role="alert"><h2>Query Preview failed</h2><p>@preview.FailureMessage</p></section> }
+
+@if (preview?.GeneratedSql is not null) { <section class="preview-panel" aria-labelledby="sql-title"><div class="panel-heading"><h2 id="sql-title">Generated SQL</h2><span>Values remain parameterized</span></div><pre><code>@preview.GeneratedSql</code></pre></section> }
+
+@if (preview?.Result is not null)
+{
+    <section class="preview-panel" aria-labelledby="results-title"><div class="panel-heading"><h2 id="results-title">Dynamic Result</h2><span>@preview.Result.RowCount rows · @preview.Result.Duration.TotalMilliseconds.ToString("N0") ms@if (preview.Result.WasTruncated) { <text> · Truncated</text> }</span></div>
+        @if (preview.Result.RowCount == 0) { <p class="empty-result">The Query Preview returned no rows.</p> }
+        else { <div class="result-wrap"><table><thead><tr>@foreach (var column in preview.Result.Columns) { <th scope="col">@column.Name<small>@column.NormalizedType</small></th> }</tr></thead><tbody>@foreach (var row in preview.Result.Rows) { <tr>@foreach (var value in row.Values) { <td>@FormatValue(value)</td> }</tr> }</tbody></table></div> }
+    </section>
+}
+
+@code {
+    private IReadOnlyList<DataSourceSummary> dataSources = [];
+    private Guid? selectedDataSourceId;
+    private DataSourceSchema? schema;
+    private string selectedObjectName = string.Empty;
+    private Guid sourceId = Guid.NewGuid();
+    private readonly List<EditorSelection> selections = [];
+    private QueryPreviewResponse? preview;
+    private bool isPreviewing;
+    private SchemaDatabaseObject? SelectedObject => schema?.Objects.SingleOrDefault(item => item.QualifiedName.DisplayName == selectedObjectName);
+    protected override async Task OnInitializedAsync() => dataSources = await DataSourceService.ListAsync();
+    private async Task ChangeDataSourceAsync(ChangeEventArgs args) { selectedDataSourceId = Guid.TryParse(args.Value?.ToString(), out var id) ? id : null; schema = selectedDataSourceId is null ? null : await SchemaService.GetAsync(selectedDataSourceId.Value); ResetSource(); }
+    private void ChangeObject(ChangeEventArgs args) { selectedObjectName = args.Value?.ToString() ?? string.Empty; sourceId = Guid.NewGuid(); selections.Clear(); preview = null; }
+    private void ResetSource() { selectedObjectName = string.Empty; sourceId = Guid.NewGuid(); selections.Clear(); preview = null; }
+    private bool IsSelected(string columnName) => selections.Any(item => item.ColumnName == columnName);
+    private void ToggleColumn(SchemaColumn column, bool selected) { if (selected && !IsSelected(column.Name)) selections.Add(new(column.Name, SafeOutputName(column.Name))); if (!selected) selections.RemoveAll(item => item.ColumnName == column.Name); }
+    private void Move(int index, int offset) { var item = selections[index]; selections.RemoveAt(index); selections.Insert(index + offset, item); }
+    private void Remove(int index) => selections.RemoveAt(index);
+    private async Task PreviewAsync() { if (selectedDataSourceId is null || SelectedObject is null) return; isPreviewing = true; try { var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, SelectedObject.QualifiedName), selections.Select(item => new QuerySelection(sourceId, item.ColumnName, item.OutputName)).ToArray()); preview = await PreviewService.PreviewAsync(selectedDataSourceId.Value, definition); } finally { isPreviewing = false; } }
+    private static string SafeOutputName(string name) { var candidate = new string(name.Select(character => char.IsLetterOrDigit(character) || character == '_' ? character : '_').ToArray()); return candidate.Length > 0 && char.IsDigit(candidate[0]) ? $"_{candidate}" : candidate; }
+    private static string FormatValue(object? value) => value switch { null => "NULL", DateTime dateTime => dateTime.ToString("u"), DateTimeOffset offset => offset.ToString("u"), byte[] bytes => $"{bytes.Length} bytes", _ => Convert.ToString(value, System.Globalization.CultureInfo.CurrentCulture) ?? string.Empty };
+    private sealed class EditorSelection(string columnName, string outputName) { public string ColumnName { get; } = columnName; public string OutputName { get; set; } = outputName; }
+}

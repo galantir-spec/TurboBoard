@@ -5,6 +5,7 @@ using TurboBoard.Web.Components;
 using TurboBoard.Web.DataSources;
 using TurboBoard.Web.Hosting;
 using TurboBoard.Web.Schemas;
+using TurboBoard.Web.Queries;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,6 +21,7 @@ builder.Services.AddTurboBoardPersistence(statePaths.DatabasePath);
 builder.Services.AddTurboBoardSqlServer();
 builder.Services.AddTurboBoardDataSources();
 builder.Services.AddTurboBoardSchemas();
+builder.Services.AddTurboBoardQueries();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

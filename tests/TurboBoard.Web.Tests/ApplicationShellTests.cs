@@ -8,6 +8,8 @@ using TurboBoard.Core.DataSources;
 using TurboBoard.Core.Schemas;
 using TurboBoard.Web.DataSources;
 using TurboBoard.Web.Schemas;
+using TurboBoard.Core.Queries;
+using TurboBoard.Web.Queries;
 
 namespace TurboBoard.Web.Tests;
 
@@ -49,6 +51,8 @@ public sealed class ApplicationShellTests
         var queriesHtml = await queries.Content.ReadAsStringAsync();
         Assert.Equal(HttpStatusCode.OK, queries.StatusCode);
         Assert.Contains("Queries", queriesHtml, StringComparison.Ordinal);
+        Assert.Contains("Run preview", queriesHtml, StringComparison.Ordinal);
+        Assert.Contains("Choose a Data Source", queriesHtml, StringComparison.Ordinal);
 
         Assert.True(File.Exists(Path.Combine(stateDirectory.Path, "turboboard.db")));
         Assert.True(Directory.Exists(Path.Combine(stateDirectory.Path, "keys")));
@@ -152,6 +156,37 @@ public sealed class ApplicationShellTests
         Assert.Contains("crm.Customers", html, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task Query_preview_service_validates_compiles_executes_and_returns_dynamic_results()
+    {
+        using var stateDirectory = TemporaryDirectory.Create();
+        await using var application = new TurboBoardApplicationFactory(
+            stateDirectory.Path,
+            services =>
+            {
+                services.RemoveAll<IDataSourceSchemaDiscoverer>();
+                services.AddSingleton<IDataSourceSchemaDiscoverer, ExplorerSchemaDiscoverer>();
+                services.RemoveAll<IQueryExecutor>();
+                services.AddSingleton<IQueryExecutor, RecordingQueryExecutor>();
+            });
+        await using var scope = application.Services.CreateAsyncScope();
+        var dataSources = scope.ServiceProvider.GetRequiredService<IDataSourceService>();
+        var schemas = scope.ServiceProvider.GetRequiredService<ISchemaService>();
+        var previews = scope.ServiceProvider.GetRequiredService<IQueryPreviewService>();
+        var dataSourceId = await dataSources.SaveAsync(null, DataSourceDraft.Structured("Warehouse", "sql.internal", "analytics", true));
+        _ = await schemas.RefreshAsync(dataSourceId);
+        var sourceId = Guid.NewGuid();
+
+        var preview = await previews.PreviewAsync(dataSourceId, new QueryDefinition(
+            1,
+            new(sourceId, new("sales", "Orders")),
+            [new(sourceId, "Id", "OrderId")]));
+
+        Assert.Equal(QueryPreviewStatus.Succeeded, preview.Status);
+        Assert.Contains("SELECT TOP (101)", preview.GeneratedSql, StringComparison.Ordinal);
+        Assert.Equal(42, Assert.Single(preview.Result!.Rows).Values[0]);
+    }
+
     private sealed class TurboBoardApplicationFactory(
         string stateDirectory,
         Action<IServiceCollection>? configureServices = null)
@@ -188,6 +223,14 @@ public sealed class ApplicationShellTests
                     [new SchemaColumn("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select)]),
             ],
             [new SchemaRelationship("FK_Orders_Customers", new("sales", "Orders"), ["Id"], new("crm", "Customers"), ["Id"])]));
+    }
+
+    private sealed class RecordingQueryExecutor : IQueryExecutor
+    {
+        public string ProviderKey => "sql-server";
+
+        public Task<DynamicResult> ExecuteAsync(DataSourceConnectionRequest connection, ICompiledQuery query, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new DynamicResult(query.Columns, [new DynamicResultRow([42])], TimeSpan.FromMilliseconds(5), false));
     }
 
     private sealed class TemporaryDirectory : IDisposable
