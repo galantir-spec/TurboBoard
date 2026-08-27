@@ -248,6 +248,42 @@ public sealed class QueriesComponentTests
         return context;
     }
 
+    [Fact]
+    public void Related_object_join_exposes_joined_fields_and_persists_logical_source_identity()
+    {
+        using var context = CreateContext(out var savedQueries);
+        var component = context.Render<QueriesPage>();
+        component.FindAll("select")[1].Change(TestDataSource.Id.ToString());
+        component.FindAll("select")[2].Change("sales.Orders");
+        component.FindAll("button").Single(item => item.TextContent.Trim() == "Add related object").Click();
+        component.Find(".join-object").Change("crm.Customers");
+        component.Find(".join-relationship").Change("FK_Orders_Customers");
+        component.Find(".join-alias").Input("Customer");
+        component.Find(".add-join").Click();
+        component.Find("input[maxlength='200']").Input("Orders with customers");
+        component.FindAll(".field-option input").Last().Change(true);
+
+        component.FindAll("button").Single(item => item.TextContent.Trim() == "Save As").Click();
+
+        var join = Assert.Single(savedQueries.LastDraft!.Definition.AvailableJoins);
+        Assert.Equal("Customer", join.Source.Alias);
+        Assert.Contains(savedQueries.LastDraft.Definition.Selections, item => item.SourceId == join.Source.Id);
+    }
+
+    [Fact]
+    public void Dependent_join_controls_disable_graph_breaking_remove_and_reorder()
+    {
+        using var context = CreateContext(out var savedQueries);
+        savedQueries.SeedDependentJoins();
+        var component = context.Render<QueriesPage>();
+        component.FindAll("select")[0].Change(savedQueries.CurrentId.ToString());
+
+        var rows = component.FindAll(".join-row");
+        Assert.Equal(2, rows.Count);
+        Assert.True(rows[0].QuerySelector("button[aria-label='Remove join']")!.HasAttribute("disabled"));
+        Assert.True(rows[1].QuerySelector("button[aria-label='Move join up']")!.HasAttribute("disabled"));
+    }
+
     private static class TestDataSource
     {
         public static readonly Guid Id = Guid.Parse("22222222-2222-2222-2222-222222222222");
@@ -274,8 +310,11 @@ public sealed class QueriesComponentTests
         private static readonly DataSourceSchema Schema = new(
             TestDataSource.Id,
             DateTimeOffset.UtcNow,
-            [new SchemaDatabaseObject(TestDataSource.ObjectName, DatabaseObjectKind.Table, [new SchemaColumn("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)])],
-            []);
+            [
+                new SchemaDatabaseObject(TestDataSource.ObjectName, DatabaseObjectKind.Table, [new SchemaColumn("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)]),
+                new SchemaDatabaseObject(new("crm", "Customers"), DatabaseObjectKind.Table, [new SchemaColumn("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)]),
+            ],
+            [new("FK_Orders_Customers", TestDataSource.ObjectName, ["Id"], new("crm", "Customers"), ["Id"])]);
         public Task<DataSourceSchema?> GetAsync(Guid dataSourceId, CancellationToken cancellationToken = default) => Task.FromResult<DataSourceSchema?>(Schema);
         public Task<SchemaState?> GetStateAsync(Guid dataSourceId, CancellationToken cancellationToken = default) => Task.FromResult<SchemaState?>(new(Schema, null, null, null));
         public Task<SchemaRefreshResult> RefreshAsync(Guid dataSourceId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
@@ -304,6 +343,15 @@ public sealed class QueriesComponentTests
         public SavedQueryDraft? LastDraft { get; private set; }
 
         public void SeedCurrent() => Seed(TestDataSource.Definition, null);
+        public void SeedDependentJoins()
+        {
+            var customerId = Guid.NewGuid(); var addressId = Guid.NewGuid();
+            Seed(new QueryDefinition(QueryDefinition.CurrentVersion, new(TestDataSource.SourceId, TestDataSource.ObjectName), [new(TestDataSource.SourceId, "Id", "Id")], Joins:
+            [
+                new(Guid.NewGuid(), QueryJoinType.Inner, new(customerId, new("crm", "Customers"), "Customer"), [new(TestDataSource.SourceId, "Id", customerId, "Id")]),
+                new(Guid.NewGuid(), QueryJoinType.Left, new(addressId, new("crm", "Addresses"), "Address"), [new(customerId, "Id", addressId, "CustomerId")]),
+            ]), null);
+        }
         public void SeedUnsupported() => Seed(null, new("query.definition.version.unsupported", "Newer version."));
         private void Seed(QueryDefinition? definition, ValidationDiagnostic? diagnostic)
         {

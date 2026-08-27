@@ -3,9 +3,28 @@ using TurboBoard.Core.Schemas;
 
 namespace TurboBoard.Core.Queries;
 
-public sealed record QuerySource(Guid Id, QualifiedDatabaseObjectName Object);
+public sealed record QuerySource(Guid Id, QualifiedDatabaseObjectName Object, string? Alias = null);
 
 public sealed record QuerySelection(Guid SourceId, string ColumnName, string OutputName);
+
+public enum QueryJoinType
+{
+    Inner,
+    Left,
+}
+
+public sealed record QueryJoinEquality(
+    Guid LeftSourceId,
+    string LeftColumnName,
+    Guid RightSourceId,
+    string RightColumnName);
+
+public sealed record QueryJoin(
+    Guid Id,
+    QueryJoinType Type,
+    QuerySource Source,
+    IReadOnlyList<QueryJoinEquality> Equalities,
+    string? RelationshipName = null);
 
 public enum QueryFilterOperator
 {
@@ -83,18 +102,34 @@ public sealed record QueryDefinition(
     IReadOnlyList<QuerySelection> Selections,
     IReadOnlyList<QueryFilter>? Filters = null,
     QueryFilterExpression? FilterExpression = null,
-    IReadOnlyList<QueryParameterDefinition>? Parameters = null)
+    IReadOnlyList<QueryParameterDefinition>? Parameters = null,
+    IReadOnlyList<QueryJoin>? Joins = null)
 {
-    public const int CurrentVersion = 3;
+    public const int CurrentVersion = 4;
     public IReadOnlyList<QueryFilter> AvailableFilters => Filters ?? [];
     public IReadOnlyList<QueryParameterDefinition> AvailableParameters => Parameters ?? [];
+    public IReadOnlyList<QueryJoin> AvailableJoins => Joins ?? [];
 }
 
 public sealed record ValidationDiagnostic(string Code, string Message);
 
-public sealed record ExecutableSelection(SchemaColumn Column, string OutputName);
+public sealed record ExecutableSelection(Guid SourceId, SchemaColumn Column, string OutputName);
+
+public sealed record ExecutableJoinEquality(
+    Guid LeftSourceId,
+    SchemaColumn LeftColumn,
+    Guid RightSourceId,
+    SchemaColumn RightColumn);
+
+public sealed record ExecutableJoin(
+    Guid Id,
+    QueryJoinType Type,
+    Guid SourceId,
+    SchemaDatabaseObject Source,
+    IReadOnlyList<ExecutableJoinEquality> Equalities);
 
 public sealed record ExecutableFilter(
+    Guid SourceId,
     SchemaColumn Column,
     QueryFilterOperator Operator,
     IReadOnlyList<object> Values);
@@ -109,12 +144,14 @@ public sealed class ExecutableQuery
     internal ExecutableQuery(
         Guid sourceId,
         SchemaDatabaseObject source,
+        IReadOnlyList<ExecutableJoin> joins,
         IReadOnlyList<ExecutableSelection> selections,
         IReadOnlyList<ExecutableFilter> filters,
         ExecutableFilterExpression? filterExpression)
     {
         SourceId = sourceId;
         Source = source;
+        Joins = joins;
         Selections = selections;
         Filters = filters;
         FilterExpression = filterExpression;
@@ -122,6 +159,7 @@ public sealed class ExecutableQuery
 
     public Guid SourceId { get; }
     public SchemaDatabaseObject Source { get; }
+    public IReadOnlyList<ExecutableJoin> Joins { get; }
     public IReadOnlyList<ExecutableSelection> Selections { get; }
     public IReadOnlyList<ExecutableFilter> Filters { get; }
     public ExecutableFilterExpression? FilterExpression { get; }

@@ -189,4 +189,42 @@ public sealed class SqlServerQueryCompilerTests
         Assert.Equal(payload, Assert.Single(compiled.Parameters).Value);
         Assert.Equal("nvarchar", compiled.Parameters[0].ProviderType);
     }
+
+    [Fact]
+    public void Composite_left_join_uses_logical_aliases_and_exact_parameter_order()
+    {
+        var ordersId = Guid.NewGuid();
+        var customersId = Guid.NewGuid();
+        var ordersName = new QualifiedDatabaseObjectName("sales", "Orders");
+        var customersName = new QualifiedDatabaseObjectName("crm", "Customers");
+        var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow,
+        [
+            new(ordersName, DatabaseObjectKind.Table,
+            [
+                new("CustomerId", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter),
+                new("TenantId", 2, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter),
+            ]),
+            new(customersName, DatabaseObjectKind.Table,
+            [
+                new("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter),
+                new("TenantId", 2, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter),
+                new("Name", 3, NormalizedTypeCategory.Text, "nvarchar", false, 100, null, null, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter),
+            ]),
+        ], [new("FK_Orders_Customers", ordersName, ["CustomerId", "TenantId"], customersName, ["Id", "TenantId"])]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(ordersId, ordersName),
+            [new(customersId, "Name", "CustomerName")],
+            FilterExpression: new QueryFilterCondition(Guid.NewGuid(), true, new(customersId, "Name", QueryFilterOperator.Equal, ["Ada"])),
+            Joins: [new(Guid.NewGuid(), QueryJoinType.Left, new(customersId, customersName),
+                [new(ordersId, "CustomerId", customersId, "Id"), new(ordersId, "TenantId", customersId, "TenantId")], "FK_Orders_Customers")]);
+        var prepared = QueryEngine.Prepare(schema, definition);
+
+        var compiled = new SqlServerQueryCompiler().Compile(prepared.Query!, 10);
+
+        Assert.Equal("SELECT TOP (11) [q1].[Name] AS [CustomerName] FROM [sales].[Orders] AS [q0] LEFT JOIN [crm].[Customers] AS [q1] ON [q0].[CustomerId] = [q1].[Id] AND [q0].[TenantId] = [q1].[TenantId] WHERE [q1].[Name] = @p0;", compiled.InspectionText);
+        Assert.Equal("Ada", Assert.Single(compiled.Parameters).Value);
+
+        var innerDefinition = definition with { Joins = definition.AvailableJoins.Select(item => item with { Type = QueryJoinType.Inner }).ToArray() };
+        var inner = new SqlServerQueryCompiler().Compile(QueryEngine.Prepare(schema, innerDefinition).Query!, 10);
+        Assert.Contains(" INNER JOIN [crm].[Customers] AS [q1] ON ", inner.InspectionText, StringComparison.Ordinal);
+    }
 }

@@ -37,6 +37,7 @@ internal sealed class QueryDefinitionSerializer : IQueryDefinitionSerializer
             return version switch
             {
                 QueryDefinition.CurrentVersion => ReadCurrent(json),
+                3 => ReadVersionThree(json),
                 2 => ReadVersionTwo(json),
                 1 => ReadVersionOne(json),
                 > QueryDefinition.CurrentVersion => new(
@@ -86,6 +87,21 @@ internal sealed class QueryDefinitionSerializer : IQueryDefinitionSerializer
                 legacy.Selections,
                 legacy.Filters,
                 legacy.FilterExpression,
+                []), null);
+    }
+
+    private static QueryDefinitionReadResult ReadVersionThree(string json)
+    {
+        var legacy = JsonSerializer.Deserialize<QueryDefinition>(json, JsonOptions);
+        return legacy is null
+            ? Invalid("The Saved Query contains an empty Query Definition.")
+            : new(new(
+                QueryDefinition.CurrentVersion,
+                legacy.Source,
+                legacy.Selections,
+                legacy.Filters,
+                legacy.FilterExpression,
+                legacy.Parameters,
                 []), null);
     }
 

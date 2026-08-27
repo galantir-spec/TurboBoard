@@ -13,6 +13,8 @@ public sealed class SqlServerQueryCompiler : IQueryCompiler
         ArgumentNullException.ThrowIfNull(query);
         ArgumentOutOfRangeException.ThrowIfLessThan(previewLimit, 1);
         var quote = new SqlCommandBuilder();
+        var aliases = new Dictionary<Guid, string> { [query.SourceId] = query.Joins.Count == 0 ? "[q]" : "[q0]" };
+        for (var index = 0; index < query.Joins.Count; index++) aliases.Add(query.Joins[index].SourceId, $"[q{index + 1}]");
         var columns = query.Selections.Select((selection, ordinal) => new DynamicResultColumn(
             ordinal,
             selection.OutputName,
@@ -20,39 +22,42 @@ public sealed class SqlServerQueryCompiler : IQueryCompiler
             selection.Column.ProviderType,
             selection.Column.IsNullable)).ToArray();
         var selections = query.Selections.Select(selection =>
-            $"[q].{quote.QuoteIdentifier(selection.Column.Name)} AS {quote.QuoteIdentifier(selection.OutputName)}");
+            $"{aliases[selection.SourceId]}.{quote.QuoteIdentifier(selection.Column.Name)} AS {quote.QuoteIdentifier(selection.OutputName)}");
         var parameters = new List<QueryParameterSpecification>();
-        var predicate = CompileExpression(query.FilterExpression, quote, parameters, wrapGroup: false);
+        var predicate = CompileExpression(query.FilterExpression, aliases, quote, parameters, wrapGroup: false);
         if (parameters.Count > MaximumParameterCount)
             throw new QueryCompilationException([new("query.filter.parameter-limit", $"SQL Server supports at most {MaximumParameterCount:N0} parameters in one Query Preview. Reduce the filter values.")]);
         var where = predicate is null ? string.Empty : $" WHERE {predicate}";
+        var joins = query.Joins.Select(join => CompileJoin(join, aliases, quote));
+        var joinClause = query.Joins.Count == 0 ? string.Empty : $" {string.Join(" ", joins)}";
         var commandText = $"SELECT TOP ({previewLimit + 1}) {string.Join(", ", selections)} " +
-            $"FROM {quote.QuoteIdentifier(query.Source.QualifiedName.Schema)}.{quote.QuoteIdentifier(query.Source.QualifiedName.Name)} AS [q]{where};";
+            $"FROM {quote.QuoteIdentifier(query.Source.QualifiedName.Schema)}.{quote.QuoteIdentifier(query.Source.QualifiedName.Name)} AS {aliases[query.SourceId]}{joinClause}{where};";
         return new SqlServerCompiledQuery(commandText, previewLimit, columns, parameters);
     }
 
     private static string? CompileExpression(
         ExecutableFilterExpression? expression,
+        IReadOnlyDictionary<Guid, string> aliases,
         SqlCommandBuilder quote,
         List<QueryParameterSpecification> parameters,
         bool wrapGroup = true) => expression switch
     {
         null => null,
-        ExecutableFilterCondition condition => CompileFilter(condition.Filter, quote, parameters),
-        ExecutableFilterNot not => $"NOT ({CompileExpression(not.Operand, quote, parameters, wrapGroup: false)})",
+        ExecutableFilterCondition condition => CompileFilter(condition.Filter, aliases, quote, parameters),
+        ExecutableFilterNot not => $"NOT ({CompileExpression(not.Operand, aliases, quote, parameters, wrapGroup: false)})",
         ExecutableFilterGroup group => WrapGroup(
             string.Join(
                 group.Operator == QueryFilterGroupOperator.And ? " AND " : " OR ",
-                group.Children.Select(child => CompileExpression(child, quote, parameters))),
+                group.Children.Select(child => CompileExpression(child, aliases, quote, parameters))),
             wrapGroup),
         _ => throw new InvalidOperationException("Unsupported validated filter expression."),
     };
 
     private static string WrapGroup(string predicate, bool wrapGroup) => wrapGroup ? $"({predicate})" : predicate;
 
-    private static string CompileFilter(ExecutableFilter filter, SqlCommandBuilder quote, List<QueryParameterSpecification> parameters)
+    private static string CompileFilter(ExecutableFilter filter, IReadOnlyDictionary<Guid, string> aliases, SqlCommandBuilder quote, List<QueryParameterSpecification> parameters)
     {
-        var column = $"[q].{quote.QuoteIdentifier(filter.Column.Name)}";
+        var column = $"{aliases[filter.SourceId]}.{quote.QuoteIdentifier(filter.Column.Name)}";
         if (filter.Operator == QueryFilterOperator.IsNull) return $"{column} IS NULL";
         if (filter.Operator == QueryFilterOperator.IsNotNull) return $"{column} IS NOT NULL";
         var names = filter.Values.Select(value => AddParameter(filter, value, parameters)).ToArray();
@@ -72,6 +77,19 @@ public sealed class SqlServerQueryCompiler : IQueryCompiler
             QueryFilterOperator.Between => $"{column} BETWEEN {names[0]} AND {names[1]}",
             _ => throw new InvalidOperationException("Unsupported validated filter operator."),
         };
+    }
+
+    private static string CompileJoin(ExecutableJoin join, IReadOnlyDictionary<Guid, string> aliases, SqlCommandBuilder quote)
+    {
+        var keyword = join.Type switch
+        {
+            QueryJoinType.Inner => "INNER JOIN",
+            QueryJoinType.Left => "LEFT JOIN",
+            _ => throw new InvalidOperationException("Unsupported validated join type."),
+        };
+        var equalities = join.Equalities.Select(equality =>
+            $"{aliases[equality.LeftSourceId]}.{quote.QuoteIdentifier(equality.LeftColumn.Name)} = {aliases[equality.RightSourceId]}.{quote.QuoteIdentifier(equality.RightColumn.Name)}");
+        return $"{keyword} {quote.QuoteIdentifier(join.Source.QualifiedName.Schema)}.{quote.QuoteIdentifier(join.Source.QualifiedName.Name)} AS {aliases[join.SourceId]} ON {string.Join(" AND ", equalities)}";
     }
 
     private static string AddParameter(ExecutableFilter filter, object value, List<QueryParameterSpecification> parameters)

@@ -30,6 +30,13 @@ public static partial class QueryEngine
             diagnostics.Add(new("query.source.unknown", $"Source '{definition.Source.Object.DisplayName}' is not in the current Schema."));
         }
 
+        var logicalSources = new Dictionary<Guid, SchemaDatabaseObject>();
+        if (source is not null && definition.Source.Id != Guid.Empty)
+        {
+            logicalSources[definition.Source.Id] = source;
+        }
+        var executableJoins = PrepareJoins(schema, definition.AvailableJoins, logicalSources, diagnostics);
+
         if (definition.Selections.Count == 0)
         {
             diagnostics.Add(new("query.selection.required", "Select at least one column."));
@@ -39,13 +46,13 @@ public static partial class QueryEngine
         var outputNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var selection in definition.Selections)
         {
-            if (selection.SourceId != definition.Source.Id)
+            if (!logicalSources.TryGetValue(selection.SourceId, out var selectionSource))
             {
                 diagnostics.Add(new("query.selection.source-unknown", $"Column '{selection.ColumnName}' refers to an unknown source."));
                 continue;
             }
 
-            var column = source?.Columns.SingleOrDefault(item =>
+            var column = selectionSource.Columns.SingleOrDefault(item =>
                 string.Equals(item.Name, selection.ColumnName, StringComparison.OrdinalIgnoreCase));
             if (column is null || !column.Capabilities.HasFlag(SchemaColumnCapabilities.Select))
             {
@@ -65,7 +72,7 @@ public static partial class QueryEngine
                 continue;
             }
 
-            executableSelections.Add(new(column, selection.OutputName));
+            executableSelections.Add(new(selection.SourceId, column, selection.OutputName));
         }
 
         QueryFilterExpression? definitionExpression = definition.FilterExpression;
@@ -81,12 +88,117 @@ public static partial class QueryEngine
         if (parameterValues is not null) foreach (var item in parameterValues) runtimeValues.TryAdd(item.Key, item.Value);
         var parameters = ValidateParameters(definition.AvailableParameters, runtimeValues, diagnostics);
         var editorIds = new HashSet<Guid>();
-        var executableExpression = PrepareExpression(definitionExpression, definition.Source.Id, source, diagnostics, editorIds, validateIdentity: definition.FilterExpression is not null, parameters);
+        var executableExpression = PrepareExpression(definitionExpression, logicalSources, diagnostics, editorIds, validateIdentity: definition.FilterExpression is not null, parameters);
         var executableFilters = Flatten(executableExpression).ToArray();
 
         return diagnostics.Count == 0 && source is not null
-            ? new(new ExecutableQuery(definition.Source.Id, source, executableSelections, executableFilters, executableExpression), diagnostics)
+            ? new(new ExecutableQuery(definition.Source.Id, source, executableJoins, executableSelections, executableFilters, executableExpression), diagnostics)
             : new(null, diagnostics);
+    }
+
+    private static IReadOnlyList<ExecutableJoin> PrepareJoins(
+        DataSourceSchema schema,
+        IReadOnlyList<QueryJoin> joins,
+        IDictionary<Guid, SchemaDatabaseObject> logicalSources,
+        ICollection<ValidationDiagnostic> diagnostics)
+    {
+        var executable = new List<ExecutableJoin>();
+        var joinIds = new HashSet<Guid>();
+        foreach (var join in joins)
+        {
+            var valid = true;
+            if (!Enum.IsDefined(join.Type))
+            {
+                diagnostics.Add(new("query.join.type-invalid", "A join uses an unsupported join type."));
+                valid = false;
+            }
+            if (join.Id == Guid.Empty || !joinIds.Add(join.Id))
+            {
+                diagnostics.Add(new("query.join.identity-invalid", "Each join needs a unique stable identity."));
+                valid = false;
+            }
+            if (join.Source.Id == Guid.Empty || logicalSources.ContainsKey(join.Source.Id))
+            {
+                diagnostics.Add(new("query.join.source-identity-invalid", "Each joined source needs a unique stable identity."));
+                valid = false;
+            }
+            var joinedSource = schema.Objects.SingleOrDefault(item => item.QualifiedName == join.Source.Object);
+            if (joinedSource is null)
+            {
+                diagnostics.Add(new("query.join.source-unknown", $"Joined source '{join.Source.Object.DisplayName}' is not in the current Schema."));
+                continue;
+            }
+            if (join.Equalities.Count == 0)
+            {
+                diagnostics.Add(new("query.join.equality-required", "A join needs at least one column equality."));
+                valid = false;
+            }
+
+            var candidateSources = new Dictionary<Guid, SchemaDatabaseObject>(logicalSources);
+            if (!candidateSources.TryAdd(join.Source.Id, joinedSource)) valid = false;
+            var equalities = new List<ExecutableJoinEquality>();
+            foreach (var equality in join.Equalities)
+            {
+                if (!candidateSources.TryGetValue(equality.LeftSourceId, out var leftSource)
+                    || !candidateSources.TryGetValue(equality.RightSourceId, out var rightSource)
+                    || equality.LeftSourceId == equality.RightSourceId
+                    || equality.LeftSourceId != join.Source.Id && equality.RightSourceId != join.Source.Id)
+                {
+                    diagnostics.Add(new("query.join.disconnected", "Each join must connect its new logical source to an already connected source."));
+                    valid = false;
+                    continue;
+                }
+                var existingId = equality.LeftSourceId == join.Source.Id ? equality.RightSourceId : equality.LeftSourceId;
+                if (!logicalSources.ContainsKey(existingId))
+                {
+                    diagnostics.Add(new("query.join.disconnected", "Join order leaves a logical source disconnected."));
+                    valid = false;
+                    continue;
+                }
+                var leftColumn = leftSource.Columns.SingleOrDefault(item => string.Equals(item.Name, equality.LeftColumnName, StringComparison.OrdinalIgnoreCase));
+                var rightColumn = rightSource.Columns.SingleOrDefault(item => string.Equals(item.Name, equality.RightColumnName, StringComparison.OrdinalIgnoreCase));
+                if (leftColumn is null || rightColumn is null)
+                {
+                    diagnostics.Add(new("query.join.column-unknown", "A join equality refers to a column that is not in the current Schema."));
+                    valid = false;
+                    continue;
+                }
+                if (leftColumn.NormalizedType == NormalizedTypeCategory.Unknown || leftColumn.NormalizedType != rightColumn.NormalizedType)
+                {
+                    diagnostics.Add(new("query.join.type-incompatible", $"Columns '{leftColumn.Name}' and '{rightColumn.Name}' are not type-compatible."));
+                    valid = false;
+                    continue;
+                }
+                equalities.Add(new(equality.LeftSourceId, leftColumn, equality.RightSourceId, rightColumn));
+            }
+
+            if (valid && join.RelationshipName is not null && !MatchesRelationship(schema, join, candidateSources))
+            {
+                diagnostics.Add(new("query.join.relationship-mismatch", $"Relationship '{join.RelationshipName}' does not match the selected join columns."));
+                valid = false;
+            }
+            if (!valid) continue;
+            logicalSources.Add(join.Source.Id, joinedSource);
+            executable.Add(new(join.Id, join.Type, join.Source.Id, joinedSource, equalities));
+        }
+        return executable;
+    }
+
+    private static bool MatchesRelationship(DataSourceSchema schema, QueryJoin join, IReadOnlyDictionary<Guid, SchemaDatabaseObject> sources)
+    {
+        var pairs = join.Equalities.Select(equality =>
+            (Left: sources[equality.LeftSourceId].QualifiedName, equality.LeftColumnName,
+             Right: sources[equality.RightSourceId].QualifiedName, equality.RightColumnName)).ToArray();
+        return schema.AvailableRelationships.Any(relationship =>
+            string.Equals(relationship.Name, join.RelationshipName, StringComparison.Ordinal)
+            && relationship.FromColumns.Count == pairs.Length
+            && relationship.FromColumns.Select((column, index) =>
+                pairs.Any(pair =>
+                    pair.Left == relationship.FromObject && pair.LeftColumnName.Equals(column, StringComparison.OrdinalIgnoreCase)
+                    && pair.Right == relationship.ToObject && pair.RightColumnName.Equals(relationship.ToColumns[index], StringComparison.OrdinalIgnoreCase)
+                    || pair.Right == relationship.FromObject && pair.RightColumnName.Equals(column, StringComparison.OrdinalIgnoreCase)
+                    && pair.Left == relationship.ToObject && pair.LeftColumnName.Equals(relationship.ToColumns[index], StringComparison.OrdinalIgnoreCase)))
+                .All(item => item));
     }
 
     private static IReadOnlyDictionary<string, PreparedParameter> ValidateParameters(
@@ -145,8 +257,7 @@ public static partial class QueryEngine
 
     private static ExecutableFilterExpression? PrepareExpression(
         QueryFilterExpression? expression,
-        Guid sourceId,
-        SchemaDatabaseObject? source,
+        IReadOnlyDictionary<Guid, SchemaDatabaseObject> sources,
         ICollection<ValidationDiagnostic> diagnostics,
         ISet<Guid> editorIds,
         bool validateIdentity,
@@ -161,7 +272,7 @@ public static partial class QueryEngine
         switch (expression)
         {
             case QueryFilterCondition condition:
-                var filter = PrepareFilter(condition.Filter, sourceId, source, diagnostics, parameters);
+                var filter = PrepareFilter(condition.Filter, sources, diagnostics, parameters);
                 return filter is null ? null : new ExecutableFilterCondition(filter);
             case QueryFilterNot not:
                 if (not.Operand is null)
@@ -170,7 +281,7 @@ public static partial class QueryEngine
                     return null;
                 }
                 if (!not.Operand.IsEnabled) return null;
-                var operand = PrepareExpression(not.Operand, sourceId, source, diagnostics, editorIds, validateIdentity, parameters);
+                var operand = PrepareExpression(not.Operand, sources, diagnostics, editorIds, validateIdentity, parameters);
                 return operand is null ? null : new ExecutableFilterNot(operand);
             case QueryFilterGroup group:
                 if (group.Children.Count == 0)
@@ -178,7 +289,7 @@ public static partial class QueryEngine
                     diagnostics.Add(new("query.filter.group-empty", $"{group.Operator} group needs at least one condition or group."));
                     return null;
                 }
-                var children = group.Children.Select(child => PrepareExpression(child, sourceId, source, diagnostics, editorIds, validateIdentity, parameters)).Where(child => child is not null).Cast<ExecutableFilterExpression>().ToArray();
+                var children = group.Children.Select(child => PrepareExpression(child, sources, diagnostics, editorIds, validateIdentity, parameters)).Where(child => child is not null).Cast<ExecutableFilterExpression>().ToArray();
                 return children.Length == 0 ? null : new ExecutableFilterGroup(group.Operator, children);
             default:
                 diagnostics.Add(new("query.filter.expression-unknown", "The filter expression contains an unsupported node."));
@@ -188,13 +299,12 @@ public static partial class QueryEngine
 
     private static ExecutableFilter? PrepareFilter(
         QueryFilter filter,
-        Guid sourceId,
-        SchemaDatabaseObject? source,
+        IReadOnlyDictionary<Guid, SchemaDatabaseObject> sources,
         ICollection<ValidationDiagnostic> diagnostics,
         IReadOnlyDictionary<string, PreparedParameter> parameters)
     {
-        if (filter.SourceId != sourceId) { diagnostics.Add(new("query.filter.source-unknown", $"Filter column '{filter.ColumnName}' refers to an unknown source.")); return null; }
-        var column = source?.Columns.SingleOrDefault(item => string.Equals(item.Name, filter.ColumnName, StringComparison.OrdinalIgnoreCase));
+        if (!sources.TryGetValue(filter.SourceId, out var source)) { diagnostics.Add(new("query.filter.source-unknown", $"Filter column '{filter.ColumnName}' refers to an unknown source.")); return null; }
+        var column = source.Columns.SingleOrDefault(item => string.Equals(item.Name, filter.ColumnName, StringComparison.OrdinalIgnoreCase));
         if (column is null || !column.Capabilities.HasFlag(SchemaColumnCapabilities.Filter)) { diagnostics.Add(new("query.filter.column-unknown", $"Column '{filter.ColumnName}' cannot be filtered in the current Schema.")); return null; }
         if (!IsCompatible(column.NormalizedType, filter.Operator)) { diagnostics.Add(new("query.filter.operator-incompatible", $"Operator '{filter.Operator}' is not compatible with {column.NormalizedType} column '{column.Name}'.")); return null; }
         var operands = filter.AvailableOperands;
@@ -229,7 +339,7 @@ public static partial class QueryEngine
                 return null;
             }
         }
-        return new(column, filter.Operator, typedValues);
+        return new(filter.SourceId, column, filter.Operator, typedValues);
     }
 
     private static string FormatParameterValue(object value) => value switch

@@ -478,6 +478,126 @@ public sealed class QueryEngineTests
         Assert.Equal("query.parameter.value-invalid", Assert.Single(result.Diagnostics).Code);
     }
 
+    [Fact]
+    public void Composite_relationship_join_lowers_to_logical_sources_and_exact_equalities()
+    {
+        var ordersId = Guid.NewGuid();
+        var customersId = Guid.NewGuid();
+        var orders = new SchemaDatabaseObject(new("sales", "Orders"), DatabaseObjectKind.Table,
+        [
+            new("CustomerId", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select),
+            new("TenantId", 2, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select),
+        ]);
+        var customers = new SchemaDatabaseObject(new("crm", "Customers"), DatabaseObjectKind.Table,
+        [
+            new("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select),
+            new("TenantId", 2, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select),
+            new("Name", 3, NormalizedTypeCategory.Text, "nvarchar", false, 100, null, null, SchemaColumnCapabilities.Select),
+        ]);
+        var relationship = new SchemaRelationship("FK_Orders_Customers", orders.QualifiedName, ["CustomerId", "TenantId"], customers.QualifiedName, ["Id", "TenantId"]);
+        var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow, [orders, customers], [relationship]);
+        var join = new QueryJoin(Guid.NewGuid(), QueryJoinType.Left, new(customersId, customers.QualifiedName),
+        [
+            new(ordersId, "CustomerId", customersId, "Id"),
+            new(ordersId, "TenantId", customersId, "TenantId"),
+        ], relationship.Name);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(ordersId, orders.QualifiedName), [new(customersId, "Name", "CustomerName")], Joins: [join]);
+
+        var result = QueryEngine.Prepare(schema, definition);
+
+        Assert.True(result.IsValid);
+        var executable = Assert.Single(result.Query!.Joins);
+        Assert.Equal(QueryJoinType.Left, executable.Type);
+        Assert.Equal(customersId, executable.SourceId);
+        Assert.Equal(2, executable.Equalities.Count);
+        Assert.Equal(customersId, Assert.Single(result.Query.Selections).SourceId);
+    }
+
+    [Fact]
+    public void Manual_join_rejects_type_mismatch_before_compilation()
+    {
+        var rootId = Guid.NewGuid(); var joinedId = Guid.NewGuid();
+        var root = new SchemaDatabaseObject(new("dbo", "Orders"), DatabaseObjectKind.Table,
+            [new("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select)]);
+        var joined = new SchemaDatabaseObject(new("dbo", "Customers"), DatabaseObjectKind.Table,
+            [new("Code", 1, NormalizedTypeCategory.Text, "nvarchar", false, 20, null, null, SchemaColumnCapabilities.Select)]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(rootId, root.QualifiedName), [new(rootId, "Id", "Id")],
+            Joins: [new(Guid.NewGuid(), QueryJoinType.Inner, new(joinedId, joined.QualifiedName), [new(rootId, "Id", joinedId, "Code")])]);
+
+        var result = QueryEngine.Prepare(new(Guid.NewGuid(), DateTimeOffset.UtcNow, [root, joined]), definition);
+
+        Assert.Equal("query.join.type-incompatible", Assert.Single(result.Diagnostics).Code);
+        Assert.Null(result.Query);
+    }
+
+    [Fact]
+    public void Reordered_join_that_references_a_later_logical_source_is_disconnected()
+    {
+        var rootId = Guid.NewGuid(); var childId = Guid.NewGuid(); var grandchildId = Guid.NewGuid();
+        var root = new SchemaDatabaseObject(new("dbo", "Root"), DatabaseObjectKind.Table, [new("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select)]);
+        var child = new SchemaDatabaseObject(new("dbo", "Child"), DatabaseObjectKind.Table, [new("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select)]);
+        var grandchild = new SchemaDatabaseObject(new("dbo", "Grandchild"), DatabaseObjectKind.Table, [new("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select)]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(rootId, root.QualifiedName), [new(rootId, "Id", "Id")], Joins:
+        [
+            new(Guid.NewGuid(), QueryJoinType.Inner, new(grandchildId, grandchild.QualifiedName), [new(childId, "Id", grandchildId, "Id")]),
+            new(Guid.NewGuid(), QueryJoinType.Inner, new(childId, child.QualifiedName), [new(rootId, "Id", childId, "Id")]),
+        ]);
+
+        var result = QueryEngine.Prepare(new(Guid.NewGuid(), DateTimeOffset.UtcNow, [root, child, grandchild]), definition);
+
+        Assert.Contains(result.Diagnostics, item => item.Code == "query.join.disconnected");
+        Assert.Null(result.Query);
+    }
+
+    [Fact]
+    public void Undefined_join_type_is_rejected_by_core()
+    {
+        var rootId = Guid.NewGuid(); var joinedId = Guid.NewGuid();
+        var root = new SchemaDatabaseObject(new("dbo", "Root"), DatabaseObjectKind.Table, [new("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select)]);
+        var joined = new SchemaDatabaseObject(new("dbo", "Joined"), DatabaseObjectKind.Table, [new("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select)]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(rootId, root.QualifiedName), [new(rootId, "Id", "Id")],
+            Joins: [new(Guid.NewGuid(), (QueryJoinType)99, new(joinedId, joined.QualifiedName), [new(rootId, "Id", joinedId, "Id")])]);
+
+        var result = QueryEngine.Prepare(new(Guid.NewGuid(), DateTimeOffset.UtcNow, [root, joined]), definition);
+
+        Assert.Equal("query.join.type-invalid", Assert.Single(result.Diagnostics).Code);
+    }
+
+    [Fact]
+    public void Manual_self_join_preserves_two_logical_identities_and_aliases()
+    {
+        var employeeId = Guid.NewGuid(); var managerId = Guid.NewGuid();
+        var employees = new SchemaDatabaseObject(new("hr", "Employees"), DatabaseObjectKind.Table,
+        [
+            new("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select),
+            new("ManagerId", 2, NormalizedTypeCategory.Integer, "int", true, 4, 10, 0, SchemaColumnCapabilities.Select),
+            new("Name", 3, NormalizedTypeCategory.Text, "nvarchar", false, 100, null, null, SchemaColumnCapabilities.Select),
+        ]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(employeeId, employees.QualifiedName, "Employee"), [new(managerId, "Name", "ManagerName")],
+            Joins: [new(Guid.NewGuid(), QueryJoinType.Inner, new(managerId, employees.QualifiedName, "Manager"), [new(employeeId, "ManagerId", managerId, "Id")])]);
+
+        var result = QueryEngine.Prepare(new(Guid.NewGuid(), DateTimeOffset.UtcNow, [employees]), definition);
+
+        Assert.True(result.IsValid);
+        Assert.NotEqual(result.Query!.SourceId, Assert.Single(result.Query.Joins).SourceId);
+        Assert.Equal("Manager", definition.AvailableJoins[0].Source.Alias);
+    }
+
+    [Fact]
+    public void Join_identifier_payload_is_rejected_as_an_unknown_schema_column()
+    {
+        var rootId = Guid.NewGuid(); var joinedId = Guid.NewGuid();
+        var root = new SchemaDatabaseObject(new("dbo", "Root"), DatabaseObjectKind.Table, [new("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select)]);
+        var joined = new SchemaDatabaseObject(new("dbo", "Joined"), DatabaseObjectKind.Table, [new("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select)]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(rootId, root.QualifiedName), [new(rootId, "Id", "Id")],
+            Joins: [new(Guid.NewGuid(), QueryJoinType.Inner, new(joinedId, joined.QualifiedName), [new(rootId, "Id]; DROP TABLE Root;--", joinedId, "Id")])]);
+
+        var result = QueryEngine.Prepare(new(Guid.NewGuid(), DateTimeOffset.UtcNow, [root, joined]), definition);
+
+        Assert.Equal("query.join.column-unknown", Assert.Single(result.Diagnostics).Code);
+        Assert.Null(result.Query);
+    }
+
     private static DataSourceSchema SchemaWithOrders() =>
         new(Guid.NewGuid(), DateTimeOffset.UtcNow,
         [

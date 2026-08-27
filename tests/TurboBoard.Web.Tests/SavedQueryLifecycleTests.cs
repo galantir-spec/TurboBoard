@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
 using TurboBoard.Core.Queries;
 using TurboBoard.Core.Schemas;
 using TurboBoard.Persistence;
@@ -9,6 +10,34 @@ namespace TurboBoard.Web.Tests;
 
 public sealed class SavedQueryLifecycleTests
 {
+    [Fact]
+    public async Task Version_three_migrates_and_self_join_identities_survive_restart()
+    {
+        using var database = TemporaryDatabase.Create();
+        var dataSourceId = Guid.NewGuid();
+        var employeeId = Guid.NewGuid(); var managerId = Guid.NewGuid();
+        Guid savedId;
+        await using (var host = await SavedQueryTestHost.CreateAsync(database.Path))
+        {
+            await host.AddDataSourceAsync(dataSourceId);
+            var legacy = new QueryDefinition(3, new(employeeId, new("hr", "Employees")), [new(employeeId, "Name", "Name")]);
+            var migrated = host.Deserialize(JsonSerializer.Serialize(legacy, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            Assert.Equal(QueryDefinition.CurrentVersion, migrated.Definition?.Version);
+            Assert.Empty(migrated.Definition!.AvailableJoins);
+
+            var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(employeeId, new("hr", "Employees"), "Employee"), [new(managerId, "Name", "ManagerName")],
+                Joins: [new(Guid.NewGuid(), QueryJoinType.Left, new(managerId, new("hr", "Employees"), "Manager"), [new(employeeId, "ManagerId", managerId, "Id")])]);
+            savedId = await host.WithServiceAsync(service => service.SaveAsync(null, new(dataSourceId, "Managers", "", definition)));
+        }
+
+        await using var reopenedHost = await SavedQueryTestHost.CreateAsync(database.Path);
+        var reopened = await reopenedHost.WithServiceAsync(service => service.GetAsync(savedId));
+        var join = Assert.Single(reopened!.Definition!.AvailableJoins);
+        Assert.Equal(employeeId, reopened.Definition.Source.Id);
+        Assert.Equal(managerId, join.Source.Id);
+        Assert.Equal("Manager", join.Source.Alias);
+    }
+
     [Fact]
     public async Task Saved_query_reopens_after_a_service_restart()
     {
