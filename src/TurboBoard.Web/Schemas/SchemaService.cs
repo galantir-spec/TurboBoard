@@ -23,7 +23,16 @@ internal sealed class SchemaService(
     {
         if (cache.TryGet(dataSourceId, out var cached))
         {
-            return cached!.Schema;
+            if (await IsCurrentConfigurationAsync(
+                dataSourceId,
+                cached!.ConfigurationVersion,
+                cancellationToken))
+            {
+                return cached.Schema;
+            }
+
+            cache.Remove(dataSourceId);
+            return null;
         }
 
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -60,8 +69,9 @@ internal sealed class SchemaService(
             return null;
         }
 
-        var schema = cache.TryGet(dataSourceId, out var cached)
-            ? cached!.Schema
+        var schema = cache.TryGet(dataSourceId, out var cached) &&
+            cached!.ConfigurationVersion == record.ConfigurationVersion
+            ? cached.Schema
             : JsonSerializer.Deserialize<DataSourceSchema>(record.SchemaJson)
                 ?? throw new InvalidOperationException("The persisted Schema snapshot is invalid.");
         cache.Set(schema, record.ConfigurationVersion);
@@ -150,7 +160,6 @@ internal sealed class SchemaService(
                 SchemaDiscoveryStatus.InvalidConfiguration);
         }
 
-        cache.Set(schema, resolution.ConfigurationVersion);
         return new SchemaRefreshResult(
             SchemaRefreshStatus.Succeeded,
             $"Discovered {schema.Objects.Count} database objects.",
@@ -183,6 +192,7 @@ internal sealed class SchemaService(
         record.LastRefreshFailureMessage = null;
         record.LastRefreshAttemptedAtUtc = null;
         await context.SaveChangesAsync(cancellationToken);
+        cache.Set(schema, configurationVersion);
         if (await IsCurrentConfigurationAsync(schema.DataSourceId, configurationVersion, cancellationToken))
         {
             return true;
