@@ -21,7 +21,7 @@ public sealed class SqlServerConnectionTester : IDataSourceConnectionTester
                 "The selected Data Source provider is not supported by this connection tester."));
         }
 
-        return TestAsync(ToSqlServerSettings(request), cancellationToken);
+        return TestAsync(SqlServerConnectionRequest.ToSettings(request), cancellationToken);
     }
 
     public async Task<DataSourceConnectionTestResult> TestAsync(
@@ -53,28 +53,6 @@ public sealed class SqlServerConnectionTester : IDataSourceConnectionTester
         {
             return Categorize(exception);
         }
-    }
-
-    private static SqlServerConnectionSettings ToSqlServerSettings(DataSourceConnectionRequest request)
-    {
-        if (request.Mode == DataSourceConnectionMode.Advanced)
-        {
-            return SqlServerConnectionSettings.CreateAdvanced(
-                request.Secret ?? string.Empty,
-                request.TrustServerCertificate);
-        }
-
-        _ = request.Properties.TryGetValue(DataSourceConnectionPropertyNames.Endpoint, out var server);
-        _ = request.Properties.TryGetValue(DataSourceConnectionPropertyNames.Catalog, out var database);
-        _ = request.Properties.TryGetValue(DataSourceConnectionPropertyNames.UserName, out var userName);
-        _ = request.Properties.TryGetValue(DataSourceConnectionPropertyNames.IntegratedAuthentication, out var integratedSecurity);
-        return SqlServerConnectionSettings.CreateStructured(
-            server ?? string.Empty,
-            database ?? string.Empty,
-            bool.TryParse(integratedSecurity, out var integrated) && integrated,
-            userName,
-            request.Secret,
-            request.TrustServerCertificate);
     }
 
     private static DataSourceConnectionTestResult Categorize(SqlException exception) =>

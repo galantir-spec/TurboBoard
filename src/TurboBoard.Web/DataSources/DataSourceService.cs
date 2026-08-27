@@ -1,12 +1,13 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using TurboBoard.Core.DataSources;
 using TurboBoard.Persistence;
 
 namespace TurboBoard.Web.DataSources;
 
-internal sealed class DataSourceService : IDataSourceService
+internal sealed class DataSourceService : IDataSourceService, IDataSourceConnectionRequestResolver
 {
     private const string ProviderKey = "sql-server";
     private const string ProtectionPurpose = "TurboBoard.DataSources.SqlServer.Settings.v1";
@@ -17,17 +18,20 @@ internal sealed class DataSourceService : IDataSourceService
     private readonly DataSourceProviderRegistry providerRegistry;
     private readonly IDataProtector settingsProtector;
     private readonly ILogger<DataSourceService> logger;
+    private readonly IMemoryCache? schemaCache;
 
     public DataSourceService(
         IDbContextFactory<TurboBoardDbContext> contextFactory,
         DataSourceProviderRegistry providerRegistry,
         IDataProtectionProvider dataProtectionProvider,
-        ILogger<DataSourceService> logger)
+        ILogger<DataSourceService> logger,
+        IMemoryCache? schemaCache = null)
     {
         this.contextFactory = contextFactory;
         this.providerRegistry = providerRegistry;
         settingsProtector = dataProtectionProvider.CreateProtector(ProtectionPurpose);
         this.logger = logger;
+        this.schemaCache = schemaCache;
     }
 
     public async Task<IReadOnlyList<DataSourceSummary>> ListAsync(
@@ -81,8 +85,18 @@ internal sealed class DataSourceService : IDataSourceService
         {
             context.DataSources.Add(record);
         }
+        else
+        {
+            var schemaSnapshot = await context.SchemaSnapshots
+                .SingleOrDefaultAsync(item => item.DataSourceId == record.Id, cancellationToken);
+            if (schemaSnapshot is not null)
+            {
+                context.SchemaSnapshots.Remove(schemaSnapshot);
+            }
+        }
 
         await context.SaveChangesAsync(cancellationToken);
+        schemaCache?.Remove($"schema:{record.Id}");
         return record.Id;
     }
 
@@ -141,7 +155,26 @@ internal sealed class DataSourceService : IDataSourceService
 
         context.DataSources.Remove(record);
         await context.SaveChangesAsync(cancellationToken);
+        schemaCache?.Remove($"schema:{id}");
         return true;
+    }
+
+    async Task<DataSourceConnectionResolution?> IDataSourceConnectionRequestResolver.ResolveAsync(
+        Guid dataSourceId,
+        CancellationToken cancellationToken)
+    {
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        var record = await context.DataSources
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == dataSourceId, cancellationToken);
+        if (record is null)
+        {
+            return null;
+        }
+
+        return new DataSourceConnectionResolution(
+            record.Name,
+            ToConnectionRequest(Unprotect(record.ProtectedSettings)));
     }
 
     private DataSourceSummary ToSummary(DataSourceRecord record)

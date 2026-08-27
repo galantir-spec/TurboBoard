@@ -1,0 +1,170 @@
+@page "/data-sources/{DataSourceId:guid}/schema"
+@rendermode InteractiveServer
+@inject IDataSourceService DataSourceService
+@inject ISchemaService SchemaService
+
+<PageTitle>Schema Explorer · TurboBoard</PageTitle>
+
+<a class="back-link" href="data-sources">← Data Sources</a>
+
+<header class="page-header">
+    <section class="page-heading" aria-labelledby="schema-title">
+        <span class="eyebrow">Runtime metadata</span>
+        <h1 id="schema-title">Schema Explorer</h1>
+        @if (dataSource is not null)
+        {
+            <p>Browse the discovered tables, views, and columns for <strong>@dataSource.Name</strong>.</p>
+        }
+    </section>
+    @if (dataSource is not null)
+    {
+        <button class="button button-primary" type="button" @onclick="RefreshAsync" disabled="@isRefreshing">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5" /><path d="M18 9a7 7 0 0 0-12-2L4 11M6 15a7 7 0 0 0 12 2l2-4" /></svg>
+            @(isRefreshing ? "Discovering…" : state is null ? "Discover Schema" : "Refresh Schema")
+        </button>
+    }
+</header>
+
+@if (isLoading)
+{
+    <section class="loading-state" aria-live="polite">Loading Schema…</section>
+}
+else if (dataSource is null)
+{
+    <section class="empty-state" role="alert">
+        <h2>Data Source not found</h2>
+        <p>The selected Data Source may have been deleted.</p>
+    </section>
+}
+else
+{
+    @if (refreshResult?.Status == SchemaRefreshStatus.Failed)
+    {
+        <div class="feedback feedback-error" role="alert">
+            <strong>Schema refresh failed</strong>
+            <span>@refreshResult.Message</span>
+            @if (refreshResult.Schema is not null)
+            {
+                <small>The last successful Schema remains available below.</small>
+            }
+        </div>
+    }
+    else if (refreshResult?.Status == SchemaRefreshStatus.Succeeded)
+    {
+        <div class="feedback feedback-success" role="status" aria-live="polite">
+            <strong>Schema refreshed</strong>
+            <span>@refreshResult.Message</span>
+        </div>
+    }
+    else if (state?.LastRefreshFailureStatus is not null)
+    {
+        <div class="feedback feedback-warning" role="status">
+            <strong>Last refresh failed</strong>
+            <span>@state.LastRefreshFailureMessage</span>
+            <small>The Schema below was discovered successfully before that failure.</small>
+        </div>
+    }
+
+    @if (state is null)
+    {
+        <section class="empty-state" aria-labelledby="empty-schema-title">
+            <span class="empty-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8M8 13h5" /></svg>
+            </span>
+            <h2 id="empty-schema-title">No Schema discovered</h2>
+            <p>Discover runtime metadata directly from this Data Source. TurboBoard does not accept Schema definitions from the browser.</p>
+        </section>
+    }
+    else
+    {
+        <section class="schema-summary" aria-label="Schema summary">
+            <div><strong>@state.Schema.Objects.Count</strong><span>Tables and views</span></div>
+            <div><strong>@state.Schema.Objects.Sum(item => item.Columns.Count)</strong><span>Columns</span></div>
+            <div><strong>@state.Schema.DiscoveredAtUtc.ToLocalTime().ToString("g")</strong><span>Last successful discovery</span></div>
+        </section>
+
+        <section class="schema-groups" aria-label="Discovered Schema">
+            @foreach (var schemaGroup in state.Schema.Objects.GroupBy(item => item.QualifiedName.Schema))
+            {
+                <section class="schema-group" aria-label="@($"{schemaGroup.Key} schema")">
+                    <div class="schema-group-heading">
+                        <span class="schema-mark" aria-hidden="true">S</span>
+                        <h2>@schemaGroup.Key</h2>
+                        <span class="count-badge">@schemaGroup.Count() objects</span>
+                    </div>
+                    @foreach (var databaseObject in schemaGroup)
+                    {
+                        <details class="database-object" open="@(state.Schema.Objects.Count <= 4)">
+                            <summary>
+                                <span><strong>@databaseObject.QualifiedName.Name</strong><small>@databaseObject.QualifiedName.DisplayName</small></span>
+                                <span class="kind-badge">@databaseObject.Kind</span>
+                                <span class="column-count">@databaseObject.Columns.Count columns</span>
+                            </summary>
+                            <div class="column-table-wrap">
+                                <table>
+                                    <thead>
+                                        <tr><th scope="col">Column</th><th scope="col">Normalized type</th><th scope="col">Provider type</th><th scope="col">Nullable</th><th scope="col">Details</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var column in databaseObject.Columns)
+                                        {
+                                            <tr>
+                                                <th scope="row">@column.Name</th>
+                                                <td><span class="type-badge @(column.NormalizedType == NormalizedTypeCategory.Unknown ? "type-unknown" : null)">@column.NormalizedType</span></td>
+                                                <td><code>@column.ProviderType</code></td>
+                                                <td>@(column.IsNullable ? "Yes" : "No")</td>
+                                                <td>@ColumnDetails(column)</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </details>
+                    }
+                </section>
+            }
+        </section>
+    }
+}
+
+@code {
+    [Parameter]
+    public Guid DataSourceId { get; set; }
+
+    private DataSourceDetails? dataSource;
+    private SchemaState? state;
+    private SchemaRefreshResult? refreshResult;
+    private bool isLoading = true;
+    private bool isRefreshing;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        isLoading = true;
+        dataSource = await DataSourceService.GetAsync(DataSourceId);
+        state = dataSource is null ? null : await SchemaService.GetStateAsync(DataSourceId);
+        isLoading = false;
+    }
+
+    private async Task RefreshAsync()
+    {
+        isRefreshing = true;
+        try
+        {
+            refreshResult = await SchemaService.RefreshAsync(DataSourceId);
+            state = await SchemaService.GetStateAsync(DataSourceId);
+        }
+        finally
+        {
+            isRefreshing = false;
+        }
+    }
+
+    private static string ColumnDetails(SchemaColumn column)
+    {
+        var details = new List<string>();
+        if (column.MaximumLength is not null) details.Add($"Length {column.MaximumLength}");
+        if (column.Precision is not null) details.Add($"Precision {column.Precision}");
+        if (column.Scale is not null) details.Add($"Scale {column.Scale}");
+        return details.Count == 0 ? "—" : string.Join(" · ", details);
+    }
+}

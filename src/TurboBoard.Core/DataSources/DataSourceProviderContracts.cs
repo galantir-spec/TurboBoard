@@ -1,3 +1,5 @@
+using TurboBoard.Core.Schemas;
+
 namespace TurboBoard.Core.DataSources;
 
 public enum DataSourceConnectionMode
@@ -53,13 +55,18 @@ public interface IDataSourceConnectionTester
 public sealed class DataSourceProviderRegistry
 {
     private readonly IReadOnlyDictionary<string, IDataSourceConnectionTester> connectionTesters;
+    private readonly IReadOnlyDictionary<string, IDataSourceSchemaDiscoverer> schemaDiscoverers;
 
-    public DataSourceProviderRegistry(IEnumerable<IDataSourceConnectionTester> connectionTesters)
+    public DataSourceProviderRegistry(
+        IEnumerable<IDataSourceConnectionTester> connectionTesters,
+        IEnumerable<IDataSourceSchemaDiscoverer>? schemaDiscoverers = null)
     {
         ArgumentNullException.ThrowIfNull(connectionTesters);
         this.connectionTesters = connectionTesters.ToDictionary(
             tester => tester.ProviderKey,
             StringComparer.OrdinalIgnoreCase);
+        this.schemaDiscoverers = (schemaDiscoverers ?? [])
+            .ToDictionary(discoverer => discoverer.ProviderKey, StringComparer.OrdinalIgnoreCase);
     }
 
     public IDataSourceConnectionTester GetConnectionTester(string providerKey)
@@ -68,5 +75,13 @@ public sealed class DataSourceProviderRegistry
         return connectionTesters.TryGetValue(providerKey, out var tester)
             ? tester
             : throw new KeyNotFoundException($"No connection tester is registered for provider '{providerKey}'.");
+    }
+
+    public IDataSourceSchemaDiscoverer GetSchemaDiscoverer(string providerKey)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);
+        return schemaDiscoverers.TryGetValue(providerKey, out var discoverer)
+            ? discoverer
+            : throw new KeyNotFoundException($"No Schema discoverer is registered for provider '{providerKey}'.");
     }
 }

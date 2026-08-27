@@ -46,6 +46,43 @@ public sealed class TurboBoardDbContextModelSnapshot : ModelSnapshot
 
             entity.ToTable("DataSources", (string?)null);
         });
+
+        modelBuilder.Entity("TurboBoard.Persistence.SchemaSnapshotRecord", entity =>
+        {
+            entity.Property<Guid>("DataSourceId")
+                .HasColumnType("TEXT");
+
+            entity.Property<DateTimeOffset>("DiscoveredAtUtc")
+                .HasColumnType("TEXT");
+
+            entity.Property<DateTimeOffset?>("LastRefreshAttemptedAtUtc")
+                .HasColumnType("TEXT");
+
+            entity.Property<string>("LastRefreshFailureMessage")
+                .HasMaxLength(500)
+                .HasColumnType("TEXT");
+
+            entity.Property<string>("LastRefreshFailureStatus")
+                .HasMaxLength(64)
+                .HasColumnType("TEXT");
+
+            entity.Property<string>("SchemaJson")
+                .IsRequired()
+                .HasColumnType("TEXT");
+
+            entity.HasKey("DataSourceId");
+
+            entity.ToTable("SchemaSnapshots", (string?)null);
+        });
+
+        modelBuilder.Entity("TurboBoard.Persistence.SchemaSnapshotRecord", entity =>
+        {
+            entity.HasOne("TurboBoard.Persistence.DataSourceRecord", null)
+                .WithOne()
+                .HasForeignKey("TurboBoard.Persistence.SchemaSnapshotRecord", "DataSourceId")
+                .OnDelete(DeleteBehavior.Cascade)
+                .IsRequired();
+        });
 #pragma warning restore 612, 618
     }
 }

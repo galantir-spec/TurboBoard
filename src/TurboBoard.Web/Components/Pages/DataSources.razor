@@ -75,6 +75,7 @@ else
                     <span class="warning-badge">Certificate trust override</span>
                 }
                 <div class="card-actions">
+                    <a class="button button-secondary button-small" href="@($"data-sources/{source.Id}/schema")">Browse Schema</a>
                     <button class="button button-secondary button-small" type="button" @onclick="() => StartEditAsync(source.Id)" disabled="@IsBusy">Edit</button>
                     <button class="button button-tertiary button-small" type="button" @onclick="() => RequestDelete(source.Id)" disabled="@IsBusy">Delete</button>
                 </div>

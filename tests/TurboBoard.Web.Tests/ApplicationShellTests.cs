@@ -32,6 +32,12 @@ public sealed class ApplicationShellTests
         Assert.Contains("Add Data Source", dataSourcesHtml, StringComparison.Ordinal);
         Assert.Contains("Encrypted transport and certificate validation are enabled by default", dataSourcesHtml, StringComparison.Ordinal);
 
+        var schemaExplorer = await client.GetAsync($"/data-sources/{Guid.NewGuid()}/schema");
+        var schemaExplorerHtml = await schemaExplorer.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, schemaExplorer.StatusCode);
+        Assert.Contains("Schema Explorer", schemaExplorerHtml, StringComparison.Ordinal);
+        Assert.Contains("Data Source not found", schemaExplorerHtml, StringComparison.Ordinal);
+
         var queries = await client.GetAsync("/queries");
         var queriesHtml = await queries.Content.ReadAsStringAsync();
         Assert.Equal(HttpStatusCode.OK, queries.StatusCode);
