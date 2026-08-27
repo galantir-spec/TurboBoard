@@ -24,6 +24,7 @@
     --surface: var(--base-0);
     --foreground: var(--base-1000);
     --foreground-brand: var(--monta-700);
+    --foreground-brand-strong: 197 100% 27%;
     --foreground-neutral: var(--neutral-600);
     --primary: var(--monta-500);
     --primary-hover: var(--monta-700);
@@ -36,6 +37,7 @@
     --ring: var(--monta-700);
     --overlay: var(--base-1000);
     --positive: 142 71% 35%;
+    --positive-foreground: 142 71% 25%;
     --positive-subtle: 142 55% 88%;
     --warning: 38 92% 42%;
     --warning-subtle: 38 85% 90%;
@@ -44,6 +46,7 @@
     --destructive-hover: 0 72% 42%;
     --destructive-subtle: 0 75% 94%;
     --destructive-foreground: var(--base-0);
+    --destructive-text: 0 72% 35%;
     --space-0: 0;
     --space-2: 0.125rem;
     --space-4: 0.25rem;
@@ -73,6 +76,7 @@
         --surface: var(--neutral-800);
         --foreground: var(--neutral-25);
         --foreground-brand: var(--monta-100);
+        --foreground-brand-strong: var(--monta-100);
         --foreground-neutral: var(--neutral-300);
         --primary: var(--monta-500);
         --primary-hover: 197 100% 52%;
@@ -85,14 +89,16 @@
         --ring: var(--monta-100);
         --overlay: var(--base-1000);
         --positive: 142 71% 50%;
+        --positive-foreground: 142 70% 75%;
         --positive-subtle: 142 45% 24%;
         --warning: 38 92% 58%;
         --warning-subtle: 32 45% 22%;
         --warning-foreground: 38 92% 72%;
-        --destructive: 0 72% 58%;
-        --destructive-hover: 0 72% 68%;
+        --destructive: 0 72% 65%;
+        --destructive-hover: 0 72% 72%;
         --destructive-subtle: 0 42% 22%;
         --destructive-foreground: var(--neutral-950);
+        --destructive-text: 0 85% 78%;
         --shadow-sm: 0 1px 3px hsl(var(--base-1000) / 0.24);
         --shadow-lg: 0 12px 30px hsl(var(--base-1000) / 0.34);
     }

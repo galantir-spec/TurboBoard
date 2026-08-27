@@ -167,7 +167,7 @@
 
 .provider-badge {
     background: hsl(var(--background-brand-subtle));
-    color: hsl(var(--foreground-brand));
+    color: hsl(var(--foreground-brand-strong));
 }
 
 .warning-badge {
@@ -221,7 +221,7 @@
 }
 
 .delete-confirmation strong {
-    color: hsl(var(--destructive));
+    color: hsl(var(--destructive-text));
 }
 
 .delete-confirmation > div {
@@ -434,7 +434,7 @@
 }
 
 .feedback-error strong {
-    color: hsl(var(--destructive));
+    color: hsl(var(--destructive-text));
 }
 
 .feedback-success {
@@ -443,7 +443,7 @@
 }
 
 .feedback-success strong {
-    color: hsl(var(--positive));
+    color: hsl(var(--positive-foreground));
 }
 
 .feedback-neutral {
