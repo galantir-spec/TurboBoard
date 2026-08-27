@@ -1,9 +1,9 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 using TurboBoard.Core.DataSources;
 using TurboBoard.Persistence;
+using TurboBoard.Web.Schemas;
 
 namespace TurboBoard.Web.DataSources;
 
@@ -18,14 +18,14 @@ internal sealed class DataSourceService : IDataSourceService, IDataSourceConnect
     private readonly DataSourceProviderRegistry providerRegistry;
     private readonly IDataProtector settingsProtector;
     private readonly ILogger<DataSourceService> logger;
-    private readonly IMemoryCache? schemaCache;
+    private readonly SchemaMemoryCache? schemaCache;
 
     public DataSourceService(
         IDbContextFactory<TurboBoardDbContext> contextFactory,
         DataSourceProviderRegistry providerRegistry,
         IDataProtectionProvider dataProtectionProvider,
         ILogger<DataSourceService> logger,
-        IMemoryCache? schemaCache = null)
+        SchemaMemoryCache? schemaCache = null)
     {
         this.contextFactory = contextFactory;
         this.providerRegistry = providerRegistry;
@@ -80,6 +80,7 @@ internal sealed class DataSourceService : IDataSourceService, IDataSourceConnect
         record.Description = draft.Description.Trim();
         record.Provider = ProviderKey;
         record.ProtectedSettings = Protect(settings);
+        record.ConfigurationVersion = Guid.NewGuid();
         record.UpdatedAtUtc = now;
         if (existing is null)
         {
@@ -96,7 +97,7 @@ internal sealed class DataSourceService : IDataSourceService, IDataSourceConnect
         }
 
         await context.SaveChangesAsync(cancellationToken);
-        schemaCache?.Remove($"schema:{record.Id}");
+        schemaCache?.Remove(record.Id);
         return record.Id;
     }
 
@@ -155,7 +156,7 @@ internal sealed class DataSourceService : IDataSourceService, IDataSourceConnect
 
         context.DataSources.Remove(record);
         await context.SaveChangesAsync(cancellationToken);
-        schemaCache?.Remove($"schema:{id}");
+        schemaCache?.Remove(id);
         return true;
     }
 
@@ -174,6 +175,7 @@ internal sealed class DataSourceService : IDataSourceService, IDataSourceConnect
 
         return new DataSourceConnectionResolution(
             record.Name,
+            record.ConfigurationVersion,
             ToConnectionRequest(Unprotect(record.ProtectedSettings)));
     }
 

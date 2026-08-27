@@ -12,6 +12,8 @@ public sealed class DataSourceRecord
 
     public string ProtectedSettings { get; set; } = string.Empty;
 
+    public Guid ConfigurationVersion { get; set; }
+
     public DateTimeOffset CreatedAtUtc { get; set; }
 
     public DateTimeOffset UpdatedAtUtc { get; set; }

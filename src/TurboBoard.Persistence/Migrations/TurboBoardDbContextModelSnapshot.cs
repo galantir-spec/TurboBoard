@@ -20,6 +20,9 @@ public sealed class TurboBoardDbContextModelSnapshot : ModelSnapshot
             entity.Property<DateTimeOffset>("CreatedAtUtc")
                 .HasColumnType("TEXT");
 
+            entity.Property<Guid>("ConfigurationVersion")
+                .HasColumnType("TEXT");
+
             entity.Property<string>("Description")
                 .IsRequired()
                 .HasMaxLength(2000)
@@ -50,6 +53,9 @@ public sealed class TurboBoardDbContextModelSnapshot : ModelSnapshot
         modelBuilder.Entity("TurboBoard.Persistence.SchemaSnapshotRecord", entity =>
         {
             entity.Property<Guid>("DataSourceId")
+                .HasColumnType("TEXT");
+
+            entity.Property<Guid>("ConfigurationVersion")
                 .HasColumnType("TEXT");
 
             entity.Property<DateTimeOffset>("DiscoveredAtUtc")

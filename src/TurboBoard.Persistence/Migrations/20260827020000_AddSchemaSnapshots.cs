@@ -11,11 +11,19 @@ public sealed class AddSchemaSnapshots : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.AddColumn<Guid>(
+            name: "ConfigurationVersion",
+            table: "DataSources",
+            type: "TEXT",
+            nullable: false,
+            defaultValue: Guid.Empty);
+
         migrationBuilder.CreateTable(
             name: "SchemaSnapshots",
             columns: table => new
             {
                 DataSourceId = table.Column<Guid>(type: "TEXT", nullable: false),
+                ConfigurationVersion = table.Column<Guid>(type: "TEXT", nullable: false),
                 SchemaJson = table.Column<string>(type: "TEXT", nullable: false),
                 DiscoveredAtUtc = table.Column<DateTimeOffset>(type: "TEXT", nullable: false),
                 LastRefreshFailureStatus = table.Column<string>(type: "TEXT", maxLength: 64, nullable: true),
@@ -37,5 +45,6 @@ public sealed class AddSchemaSnapshots : Migration
     protected override void Down(MigrationBuilder migrationBuilder)
     {
         migrationBuilder.DropTable(name: "SchemaSnapshots");
+        migrationBuilder.DropColumn(name: "ConfigurationVersion", table: "DataSources");
     }
 }

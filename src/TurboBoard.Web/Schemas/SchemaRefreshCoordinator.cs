@@ -8,18 +8,21 @@ internal sealed class SchemaRefreshCoordinator
 
     public async Task<SchemaRefreshResult> RunAsync(
         Guid dataSourceId,
-        Func<Task<SchemaRefreshResult>> refresh)
+        Func<CancellationToken, Task<SchemaRefreshResult>> refresh,
+        CancellationToken waiterCancellationToken)
     {
         var pending = refreshes.GetOrAdd(
             dataSourceId,
-            _ => new Lazy<Task<SchemaRefreshResult>>(refresh, LazyThreadSafetyMode.ExecutionAndPublication));
-        try
-        {
-            return await pending.Value;
-        }
-        finally
-        {
-            _ = refreshes.TryRemove(new KeyValuePair<Guid, Lazy<Task<SchemaRefreshResult>>>(dataSourceId, pending));
-        }
+            _ => new Lazy<Task<SchemaRefreshResult>>(
+                () => refresh(CancellationToken.None),
+                LazyThreadSafetyMode.ExecutionAndPublication));
+        var operation = pending.Value;
+        _ = operation.ContinueWith(
+            _ => refreshes.TryRemove(
+                new KeyValuePair<Guid, Lazy<Task<SchemaRefreshResult>>>(dataSourceId, pending)),
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+        return await operation.WaitAsync(waiterCancellationToken);
     }
 }

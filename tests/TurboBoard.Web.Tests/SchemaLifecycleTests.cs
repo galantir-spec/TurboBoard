@@ -72,6 +72,51 @@ public sealed class SchemaLifecycleTests
         Assert.Null(invalidated);
     }
 
+    [Fact]
+    public async Task A_refresh_started_before_a_settings_change_cannot_restore_stale_metadata()
+    {
+        var discoverer = new BlockingSchemaDiscoverer();
+        await using var host = await SchemaTestHost.CreateAsync(discoverer);
+        var dataSourceId = await host.WithDataSourcesAsync(service => service.SaveAsync(
+            null,
+            DataSourceDraft.Structured("Warehouse", "old-sql.internal", "analytics", true)));
+
+        var refresh = host.WithSchemasAsync(service => service.RefreshAsync(dataSourceId));
+        await discoverer.Started.Task;
+        _ = await host.WithDataSourcesAsync(service => service.SaveAsync(
+            dataSourceId,
+            DataSourceDraft.Structured("Warehouse", "new-sql.internal", "analytics", true)));
+        discoverer.Release.SetResult();
+        var result = await refresh;
+        var schema = await host.WithSchemasAsync(service => service.GetAsync(dataSourceId));
+
+        Assert.Equal(SchemaRefreshStatus.Failed, result.Status);
+        Assert.Equal(SchemaDiscoveryStatus.InvalidConfiguration, result.FailureStatus);
+        Assert.Null(schema);
+    }
+
+    [Fact]
+    public async Task Cancelling_one_waiter_does_not_cancel_a_coalesced_refresh_for_other_waiters()
+    {
+        var discoverer = new BlockingSchemaDiscoverer();
+        await using var host = await SchemaTestHost.CreateAsync(discoverer);
+        var dataSourceId = await host.WithDataSourcesAsync(service => service.SaveAsync(
+            null,
+            DataSourceDraft.Structured("Warehouse", "sql.internal", "analytics", true)));
+        using var cancellation = new CancellationTokenSource();
+
+        var cancelledWaiter = host.WithSchemasAsync(
+            service => service.RefreshAsync(dataSourceId, cancellation.Token));
+        await discoverer.Started.Task;
+        var successfulWaiter = host.WithSchemasAsync(service => service.RefreshAsync(dataSourceId));
+        cancellation.Cancel();
+        discoverer.Release.SetResult();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => cancelledWaiter);
+        var result = await successfulWaiter;
+        Assert.Equal(SchemaRefreshStatus.Succeeded, result.Status);
+    }
+
     private sealed class RecordingSchemaDiscoverer : IDataSourceSchemaDiscoverer
     {
         private int callCount;
@@ -106,6 +151,30 @@ public sealed class SchemaLifecycleTests
             DataSourceConnectionRequest request,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(DataSourceConnectionTestResult.Succeeded());
+    }
+
+    private sealed class BlockingSchemaDiscoverer : IDataSourceSchemaDiscoverer
+    {
+        public string ProviderKey => "sql-server";
+
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<SchemaDiscoveryResult> DiscoverAsync(
+            DataSourceConnectionRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            Started.SetResult();
+            await Release.Task.WaitAsync(cancellationToken);
+            return SchemaDiscoveryResult.Succeeded(
+            [
+                new SchemaDatabaseObject(
+                    new QualifiedDatabaseObjectName("sales", "Orders"),
+                    DatabaseObjectKind.Table,
+                    []),
+            ]);
+        }
     }
 
     private sealed class SchemaTestHost : IAsyncDisposable

@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 using TurboBoard.Core.DataSources;
 using TurboBoard.Core.Schemas;
 using TurboBoard.Persistence;
@@ -12,7 +11,7 @@ internal sealed class SchemaService(
     IDbContextFactory<TurboBoardDbContext> contextFactory,
     IDataSourceConnectionRequestResolver connectionResolver,
     DataSourceProviderRegistry providerRegistry,
-    IMemoryCache cache,
+    SchemaMemoryCache cache,
     SchemaRefreshCoordinator coordinator,
     ILogger<SchemaService> logger) : ISchemaService
 {
@@ -22,9 +21,9 @@ internal sealed class SchemaService(
         Guid dataSourceId,
         CancellationToken cancellationToken = default)
     {
-        if (cache.TryGetValue<DataSourceSchema>(CacheKey(dataSourceId), out var cached))
+        if (cache.TryGet(dataSourceId, out var cached))
         {
-            return cached;
+            return cached!.Schema;
         }
 
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
@@ -38,7 +37,13 @@ internal sealed class SchemaService(
 
         var schema = JsonSerializer.Deserialize<DataSourceSchema>(record.SchemaJson)
             ?? throw new InvalidOperationException("The persisted Schema snapshot is invalid.");
-        StoreCache(schema);
+        cache.Set(schema, record.ConfigurationVersion);
+        if (!await IsCurrentConfigurationAsync(dataSourceId, record.ConfigurationVersion, cancellationToken))
+        {
+            cache.Remove(dataSourceId);
+            return null;
+        }
+
         return schema;
     }
 
@@ -55,11 +60,17 @@ internal sealed class SchemaService(
             return null;
         }
 
-        var schema = cache.TryGetValue<DataSourceSchema>(CacheKey(dataSourceId), out var cached)
-            ? cached!
+        var schema = cache.TryGet(dataSourceId, out var cached)
+            ? cached!.Schema
             : JsonSerializer.Deserialize<DataSourceSchema>(record.SchemaJson)
                 ?? throw new InvalidOperationException("The persisted Schema snapshot is invalid.");
-        StoreCache(schema);
+        cache.Set(schema, record.ConfigurationVersion);
+        if (!await IsCurrentConfigurationAsync(dataSourceId, record.ConfigurationVersion, cancellationToken))
+        {
+            cache.Remove(dataSourceId);
+            return null;
+        }
+
         return new SchemaState(
             schema,
             Enum.TryParse<SchemaDiscoveryStatus>(record.LastRefreshFailureStatus, out var failureStatus)
@@ -72,7 +83,10 @@ internal sealed class SchemaService(
     public Task<SchemaRefreshResult> RefreshAsync(
         Guid dataSourceId,
         CancellationToken cancellationToken = default) =>
-        coordinator.RunAsync(dataSourceId, () => RefreshCoreAsync(dataSourceId, cancellationToken));
+        coordinator.RunAsync(
+            dataSourceId,
+            operationCancellationToken => RefreshCoreAsync(dataSourceId, operationCancellationToken),
+            cancellationToken);
 
     private async Task<SchemaRefreshResult> RefreshCoreAsync(
         Guid dataSourceId,
@@ -114,7 +128,11 @@ internal sealed class SchemaService(
 
         if (discovery.Status != SchemaDiscoveryStatus.Succeeded || discovery.Objects is null)
         {
-            await RecordFailureAsync(dataSourceId, discovery, cancellationToken);
+            await RecordFailureAsync(
+                dataSourceId,
+                resolution.ConfigurationVersion,
+                discovery,
+                cancellationToken);
             return new SchemaRefreshResult(
                 SchemaRefreshStatus.Failed,
                 discovery.Message,
@@ -123,16 +141,32 @@ internal sealed class SchemaService(
         }
 
         var schema = new DataSourceSchema(dataSourceId, DateTimeOffset.UtcNow, discovery.Objects);
-        await PersistAsync(schema, cancellationToken);
-        StoreCache(schema);
+        if (!await PersistIfCurrentAsync(schema, resolution.ConfigurationVersion, cancellationToken))
+        {
+            return new SchemaRefreshResult(
+                SchemaRefreshStatus.Failed,
+                "The Data Source settings changed during discovery. Refresh the Schema again.",
+                await GetAsync(dataSourceId, cancellationToken),
+                SchemaDiscoveryStatus.InvalidConfiguration);
+        }
+
+        cache.Set(schema, resolution.ConfigurationVersion);
         return new SchemaRefreshResult(
             SchemaRefreshStatus.Succeeded,
             $"Discovered {schema.Objects.Count} database objects.",
             schema);
     }
 
-    private async Task PersistAsync(DataSourceSchema schema, CancellationToken cancellationToken)
+    private async Task<bool> PersistIfCurrentAsync(
+        DataSourceSchema schema,
+        Guid configurationVersion,
+        CancellationToken cancellationToken)
     {
+        if (!await IsCurrentConfigurationAsync(schema.DataSourceId, configurationVersion, cancellationToken))
+        {
+            return false;
+        }
+
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
         var record = await context.SchemaSnapshots
             .SingleOrDefaultAsync(item => item.DataSourceId == schema.DataSourceId, cancellationToken);
@@ -142,22 +176,34 @@ internal sealed class SchemaService(
             context.SchemaSnapshots.Add(record);
         }
 
+        record.ConfigurationVersion = configurationVersion;
         record.SchemaJson = JsonSerializer.Serialize(schema);
         record.DiscoveredAtUtc = schema.DiscoveredAtUtc;
         record.LastRefreshFailureStatus = null;
         record.LastRefreshFailureMessage = null;
         record.LastRefreshAttemptedAtUtc = null;
         await context.SaveChangesAsync(cancellationToken);
+        if (await IsCurrentConfigurationAsync(schema.DataSourceId, configurationVersion, cancellationToken))
+        {
+            return true;
+        }
+
+        await RemoveIfVersionAsync(schema.DataSourceId, configurationVersion, cancellationToken);
+        return false;
     }
 
     private async Task RecordFailureAsync(
         Guid dataSourceId,
+        Guid configurationVersion,
         SchemaDiscoveryResult discovery,
         CancellationToken cancellationToken)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
         var record = await context.SchemaSnapshots
-            .SingleOrDefaultAsync(item => item.DataSourceId == dataSourceId, cancellationToken);
+            .SingleOrDefaultAsync(
+                item => item.DataSourceId == dataSourceId &&
+                    item.ConfigurationVersion == configurationVersion,
+                cancellationToken);
         if (record is null)
         {
             return;
@@ -169,8 +215,28 @@ internal sealed class SchemaService(
         await context.SaveChangesAsync(cancellationToken);
     }
 
-    private void StoreCache(DataSourceSchema schema) =>
-        cache.Set(CacheKey(schema.DataSourceId), schema, TimeSpan.FromMinutes(30));
+    private async Task<bool> IsCurrentConfigurationAsync(
+        Guid dataSourceId,
+        Guid configurationVersion,
+        CancellationToken cancellationToken)
+    {
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        return await context.DataSources
+            .AsNoTracking()
+            .AnyAsync(
+                item => item.Id == dataSourceId && item.ConfigurationVersion == configurationVersion,
+                cancellationToken);
+    }
 
-    private static string CacheKey(Guid dataSourceId) => $"schema:{dataSourceId}";
+    private async Task RemoveIfVersionAsync(
+        Guid dataSourceId,
+        Guid configurationVersion,
+        CancellationToken cancellationToken)
+    {
+        await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
+        _ = await context.SchemaSnapshots
+            .Where(item => item.DataSourceId == dataSourceId && item.ConfigurationVersion == configurationVersion)
+            .ExecuteDeleteAsync(cancellationToken);
+        cache.Remove(dataSourceId);
+    }
 }

@@ -6,6 +6,7 @@ public static class SchemaServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         services.AddMemoryCache();
+        services.AddSingleton<SchemaMemoryCache>();
         services.AddSingleton<SchemaRefreshCoordinator>();
         services.AddScoped<ISchemaService, SchemaService>();
         return services;
