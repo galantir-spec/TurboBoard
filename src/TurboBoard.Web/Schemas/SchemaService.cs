@@ -150,7 +150,7 @@ internal sealed class SchemaService(
                 discovery.Status);
         }
 
-        var schema = new DataSourceSchema(dataSourceId, DateTimeOffset.UtcNow, discovery.Objects);
+        var schema = new DataSourceSchema(dataSourceId, DateTimeOffset.UtcNow, discovery.Objects, discovery.Relationships);
         if (!await PersistIfCurrentAsync(schema, resolution.ConfigurationVersion, cancellationToken))
         {
             return new SchemaRefreshResult(

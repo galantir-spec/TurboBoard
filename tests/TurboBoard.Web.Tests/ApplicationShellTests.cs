@@ -144,6 +144,12 @@ public sealed class ApplicationShellTests
         Assert.Contains("Integer", html, StringComparison.Ordinal);
         Assert.Contains("int", html, StringComparison.Ordinal);
         Assert.Contains("No", html, StringComparison.Ordinal);
+        Assert.Contains("Search Schema", html, StringComparison.Ordinal);
+        Assert.Contains("Identity", html, StringComparison.Ordinal);
+        Assert.Contains("PK", html, StringComparison.Ordinal);
+        Assert.Contains("Relationships", html, StringComparison.Ordinal);
+        Assert.Contains("sales.Orders", html, StringComparison.Ordinal);
+        Assert.Contains("crm.Customers", html, StringComparison.Ordinal);
     }
 
     private sealed class TurboBoardApplicationFactory(
@@ -174,8 +180,14 @@ public sealed class ApplicationShellTests
                 new SchemaDatabaseObject(
                     new QualifiedDatabaseObjectName("sales", "Orders"),
                     DatabaseObjectKind.Table,
+                    [new SchemaColumn("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select, true)],
+                    [new SchemaKey("PK_Orders", SchemaKeyKind.Primary, ["Id"])]),
+                new SchemaDatabaseObject(
+                    new QualifiedDatabaseObjectName("crm", "Customers"),
+                    DatabaseObjectKind.Table,
                     [new SchemaColumn("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select)]),
-            ]));
+            ],
+            [new SchemaRelationship("FK_Orders_Customers", new("sales", "Orders"), ["Id"], new("crm", "Customers"), ["Id"])]));
     }
 
     private sealed class TemporaryDirectory : IDisposable

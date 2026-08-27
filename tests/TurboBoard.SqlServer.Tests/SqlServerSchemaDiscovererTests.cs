@@ -59,6 +59,26 @@ public sealed class SqlServerSchemaDiscovererTests
     }
 
     [Fact]
+    public async Task Composite_keys_indexes_and_relationships_preserve_qualified_direction_and_order()
+    {
+        var reader = new RichCatalogReader();
+        var result = await new SqlServerSchemaDiscoverer(reader).DiscoverAsync(CreateRequest());
+
+        var orders = Assert.Single(result.Objects!, item => item.QualifiedName.DisplayName == "sales.Orders");
+        Assert.True(orders.Columns[0].IsIdentity);
+        Assert.True(orders.Columns[2].IsComputed);
+        Assert.Equal(["TenantId", "OrderId"], Assert.Single(orders.AvailableKeys, key => key.Kind == SchemaKeyKind.Primary).Columns);
+        var index = Assert.Single(orders.AvailableIndexes, item => item.Name == "IX_Orders_Customer");
+        Assert.Equal(["TenantId", "CustomerId"], index.KeyColumns);
+        Assert.Equal(["Total"], index.IncludedColumns);
+        var relationship = Assert.Single(result.Relationships!);
+        Assert.Equal("sales.Orders", relationship.FromObject.DisplayName);
+        Assert.Equal(["TenantId", "CustomerId"], relationship.FromColumns);
+        Assert.Equal("crm.Customers", relationship.ToObject.DisplayName);
+        Assert.Equal(["TenantId", "CustomerId"], relationship.ToColumns);
+    }
+
+    [Fact]
     public async Task Live_catalog_discovery_runs_only_when_an_operator_supplies_a_test_connection()
     {
         var connectionString = Environment.GetEnvironmentVariable("TURBOBOARD_SQLSERVER_TEST_CONNECTION");
@@ -100,5 +120,38 @@ public sealed class SqlServerSchemaDiscovererTests
             SqlServerConnectionSettings settings,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException(message);
+    }
+
+
+    private sealed class RichCatalogReader : ISqlServerCatalogReader
+    {
+        public Task<IReadOnlyList<SqlServerCatalogColumn>> ReadAsync(SqlServerConnectionSettings settings, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<SqlServerCatalogColumn>>([
+                new("sales", "Orders", "TABLE", "TenantId", 1, "int", false, 4, 10, 0, true),
+                new("sales", "Orders", "TABLE", "OrderId", 2, "int", false, 4, 10, 0),
+                new("sales", "Orders", "TABLE", "Total", 3, "decimal", false, 9, 18, 2, false, true),
+                new("sales", "Orders", "TABLE", "CustomerId", 4, "int", false, 4, 10, 0),
+                new("crm", "Customers", "TABLE", "TenantId", 1, "int", false, 4, 10, 0),
+                new("crm", "Customers", "TABLE", "CustomerId", 2, "int", false, 4, 10, 0),
+            ]);
+
+        public Task<IReadOnlyList<SqlServerCatalogKey>> ReadKeysAsync(SqlServerConnectionSettings settings, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<SqlServerCatalogKey>>([
+                new("sales", "Orders", "PK_Orders", true, 1, "TenantId"),
+                new("sales", "Orders", "PK_Orders", true, 2, "OrderId"),
+            ]);
+
+        public Task<IReadOnlyList<SqlServerCatalogIndexColumn>> ReadIndexesAsync(SqlServerConnectionSettings settings, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<SqlServerCatalogIndexColumn>>([
+                new("sales", "Orders", "IX_Orders_Customer", false, 1, false, "TenantId"),
+                new("sales", "Orders", "IX_Orders_Customer", false, 2, false, "CustomerId"),
+                new("sales", "Orders", "IX_Orders_Customer", false, 0, true, "Total"),
+            ]);
+
+        public Task<IReadOnlyList<SqlServerCatalogRelationshipColumn>> ReadRelationshipsAsync(SqlServerConnectionSettings settings, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<SqlServerCatalogRelationshipColumn>>([
+                new("FK_Orders_Customers", "sales", "Orders", 1, "TenantId", "crm", "Customers", "TenantId"),
+                new("FK_Orders_Customers", "sales", "Orders", 2, "CustomerId", "crm", "Customers", "CustomerId"),
+            ]);
     }
 }

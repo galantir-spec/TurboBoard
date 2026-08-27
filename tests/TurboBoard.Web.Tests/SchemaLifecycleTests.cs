@@ -40,6 +40,7 @@ public sealed class SchemaLifecycleTests
             null,
             DataSourceDraft.Structured("Warehouse", "sql.internal", "analytics", true)));
         _ = await host.WithSchemasAsync(service => service.RefreshAsync(dataSourceId));
+        var successful = await host.WithSchemasAsync(service => service.GetStateAsync(dataSourceId));
         discoverer.Result = new SchemaDiscoveryResult(
             SchemaDiscoveryStatus.NetworkFailure,
             "TurboBoard could not reach SQL Server.");
@@ -52,6 +53,8 @@ public sealed class SchemaLifecycleTests
         Assert.NotNull(retained);
         Assert.Equal(SchemaDiscoveryStatus.NetworkFailure, retained.LastRefreshFailureStatus);
         Assert.Equal("sales.Orders", Assert.Single(retained.Schema.Objects).QualifiedName.DisplayName);
+        Assert.Equal(successful!.Schema.DiscoveredAtUtc, retained.Schema.DiscoveredAtUtc);
+        Assert.True(retained.LastRefreshAttemptedAtUtc > retained.Schema.DiscoveredAtUtc);
     }
 
     [Fact]
@@ -117,6 +120,24 @@ public sealed class SchemaLifecycleTests
         Assert.Equal(SchemaRefreshStatus.Succeeded, result.Status);
     }
 
+    [Fact]
+    public async Task Cancelling_the_only_waiter_cancels_discovery()
+    {
+        var discoverer = new BlockingSchemaDiscoverer();
+        await using var host = await SchemaTestHost.CreateAsync(discoverer);
+        var dataSourceId = await host.WithDataSourcesAsync(service => service.SaveAsync(
+            null,
+            DataSourceDraft.Structured("Warehouse", "sql.internal", "analytics", true)));
+        using var cancellation = new CancellationTokenSource();
+
+        var refresh = host.WithSchemasAsync(service => service.RefreshAsync(dataSourceId, cancellation.Token));
+        await discoverer.Started.Task;
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => refresh);
+        await discoverer.Cancelled.Task.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
     private sealed class RecordingSchemaDiscoverer : IDataSourceSchemaDiscoverer
     {
         private int callCount;
@@ -161,12 +182,22 @@ public sealed class SchemaLifecycleTests
 
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public TaskCompletionSource Cancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public async Task<SchemaDiscoveryResult> DiscoverAsync(
             DataSourceConnectionRequest request,
             CancellationToken cancellationToken = default)
         {
             Started.SetResult();
-            await Release.Task.WaitAsync(cancellationToken);
+            try
+            {
+                await Release.Task.WaitAsync(cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                Cancelled.TrySetResult();
+                throw;
+            }
             return SchemaDiscoveryResult.Succeeded(
             [
                 new SchemaDatabaseObject(

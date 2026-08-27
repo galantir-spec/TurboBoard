@@ -18,10 +18,16 @@
     </section>
     @if (dataSource is not null)
     {
-        <button class="button button-primary" type="button" @onclick="RefreshAsync" disabled="@isRefreshing">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5" /><path d="M18 9a7 7 0 0 0-12-2L4 11M6 15a7 7 0 0 0 12 2l2-4" /></svg>
-            @(isRefreshing ? "Discovering…" : state is null ? "Discover Schema" : "Refresh Schema")
-        </button>
+        <div class="header-actions">
+            @if (isRefreshing)
+            {
+                <button class="button button-secondary" type="button" @onclick="CancelRefresh">Cancel refresh</button>
+            }
+            <button class="button button-primary" type="button" @onclick="RefreshAsync" disabled="@isRefreshing">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5" /><path d="M18 9a7 7 0 0 0-12-2L4 11M6 15a7 7 0 0 0 12 2l2-4" /></svg>
+                @(isRefreshing ? "Discovering…" : state is null ? "Discover Schema" : "Refresh Schema")
+            </button>
+        </div>
     }
 </header>
 
@@ -45,7 +51,7 @@ else
             <span>@refreshResult.Message</span>
             @if (refreshResult.Schema is not null)
             {
-                <small>The last successful Schema remains available below.</small>
+                <small>The last successful Schema remains available below and is @SchemaAge(refreshResult.Schema) old.</small>
             }
         </div>
     }
@@ -62,6 +68,7 @@ else
             <strong>Last refresh failed</strong>
             <span>@state.LastRefreshFailureMessage</span>
             <small>The Schema below was discovered successfully before that failure.</small>
+            <small>Last successful discovery: @SchemaAge(state.Schema) ago.</small>
         </div>
     }
 
@@ -83,8 +90,13 @@ else
             <div><strong>@state.Schema.DiscoveredAtUtc.ToLocalTime().ToString("g")</strong><span>Last successful discovery</span></div>
         </section>
 
+        <label class="schema-search">
+            <span>Search Schema</span>
+            <input type="search" placeholder="Schema, table, view, or column" @bind="searchText" @bind:event="oninput" />
+        </label>
+
         <section class="schema-groups" aria-label="Discovered Schema">
-            @foreach (var schemaGroup in state.Schema.Objects.GroupBy(item => item.QualifiedName.Schema))
+            @foreach (var schemaGroup in FilteredObjects.GroupBy(item => item.QualifiedName.Schema))
             {
                 <section class="schema-group" aria-label="@($"{schemaGroup.Key} schema")">
                     <div class="schema-group-heading">
@@ -109,7 +121,7 @@ else
                                         @foreach (var column in databaseObject.Columns)
                                         {
                                             <tr>
-                                                <th scope="row">@column.Name</th>
+                                                <th scope="row"><span class="column-name">@column.Name</span><span class="column-flags">@foreach (var flag in ColumnFlags(databaseObject, column)) { <span class="metadata-badge">@flag</span> }</span></th>
                                                 <td><span class="type-badge @(column.NormalizedType == NormalizedTypeCategory.Unknown ? "type-unknown" : null)">@column.NormalizedType</span></td>
                                                 <td><code>@column.ProviderType</code></td>
                                                 <td>@(column.IsNullable ? "Yes" : "No")</td>
@@ -124,6 +136,20 @@ else
                 </section>
             }
         </section>
+
+        @if (state.Schema.AvailableRelationships.Count > 0)
+        {
+            <section class="relationships" aria-labelledby="relationships-title">
+                <h2 id="relationships-title">Relationships</h2>
+                @foreach (var relationship in state.Schema.AvailableRelationships)
+                {
+                    <div class="relationship-card">
+                        <strong>@relationship.Name</strong>
+                        <span>@relationship.FromObject.DisplayName (@string.Join(", ", relationship.FromColumns)) → @relationship.ToObject.DisplayName (@string.Join(", ", relationship.ToColumns))</span>
+                    </div>
+                }
+            </section>
+        }
     }
 }
 
@@ -136,6 +162,14 @@ else
     private SchemaRefreshResult? refreshResult;
     private bool isLoading = true;
     private bool isRefreshing;
+    private string searchText = string.Empty;
+    private CancellationTokenSource? refreshCancellation;
+
+    private IEnumerable<SchemaDatabaseObject> FilteredObjects => state?.Schema.Objects.Where(item =>
+        string.IsNullOrWhiteSpace(searchText) ||
+        item.QualifiedName.Schema.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+        item.QualifiedName.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase) ||
+        item.Columns.Any(column => column.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase))) ?? [];
 
     protected override async Task OnParametersSetAsync()
     {
@@ -148,15 +182,40 @@ else
     private async Task RefreshAsync()
     {
         isRefreshing = true;
+        refreshCancellation = new CancellationTokenSource();
         try
         {
-            refreshResult = await SchemaService.RefreshAsync(DataSourceId);
+            refreshResult = await SchemaService.RefreshAsync(DataSourceId, refreshCancellation.Token);
             state = await SchemaService.GetStateAsync(DataSourceId);
+        }
+        catch (OperationCanceledException)
+        {
+            refreshResult = new(SchemaRefreshStatus.Failed, "Schema refresh cancelled.", state?.Schema, SchemaDiscoveryStatus.Cancelled);
         }
         finally
         {
+            refreshCancellation.Dispose();
+            refreshCancellation = null;
             isRefreshing = false;
         }
+    }
+
+    private void CancelRefresh() => refreshCancellation?.Cancel();
+
+    private static string SchemaAge(DataSourceSchema schema)
+    {
+        var age = DateTimeOffset.UtcNow - schema.DiscoveredAtUtc;
+        return age.TotalMinutes < 1 ? "less than a minute" : age.TotalHours < 1 ? $"{(int)age.TotalMinutes} minutes" : age.TotalDays < 1 ? $"{(int)age.TotalHours} hours" : $"{(int)age.TotalDays} days";
+    }
+
+    private IEnumerable<string> ColumnFlags(SchemaDatabaseObject databaseObject, SchemaColumn column)
+    {
+        if (databaseObject.AvailableKeys.Any(key => key.Kind == SchemaKeyKind.Primary && key.Columns.Contains(column.Name))) yield return "PK";
+        if (databaseObject.AvailableKeys.Any(key => key.Kind == SchemaKeyKind.Unique && key.Columns.Contains(column.Name))) yield return "UK";
+        if (column.IsIdentity) yield return "Identity";
+        if (column.IsComputed) yield return "Computed";
+        if (state?.Schema.AvailableRelationships.Any(relationship =>
+            relationship.FromObject == databaseObject.QualifiedName && relationship.FromColumns.Contains(column.Name)) == true) yield return "FK";
     }
 
     private static string ColumnDetails(SchemaColumn column)
