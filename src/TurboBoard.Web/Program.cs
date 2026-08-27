@@ -35,7 +35,7 @@ app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-await app.Services.InitializeTurboBoardPersistenceAsync();
+await DurableApplicationState.InitializeAsync(app.Services);
 await app.RunAsync();
 
 public partial class Program;

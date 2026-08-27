@@ -4,6 +4,10 @@ internal sealed record ApplicationStatePaths(
     string DatabasePath,
     string KeyRingDirectory)
 {
+    internal const string InitializationFailureMessage =
+        "TurboBoard durable state could not be initialized. " +
+        "Verify that the configured state directory is valid and writable.";
+
     private const string StateDirectoryConfigurationKey = "TurboBoard:StateDirectory";
 
     public static ApplicationStatePaths Prepare(
@@ -31,8 +35,7 @@ internal sealed record ApplicationStatePaths(
                 or NotSupportedException)
         {
             throw new InvalidOperationException(
-                "TurboBoard durable state could not be initialized. " +
-                "Verify that the configured state directory is valid and writable.",
+                InitializationFailureMessage,
                 exception);
         }
 

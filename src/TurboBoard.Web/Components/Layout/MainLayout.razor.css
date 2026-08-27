@@ -1,3 +1,4 @@
+@layer components {
 .skip-link {
     background: hsl(var(--foreground));
     border-radius: var(--radius-md);
@@ -264,4 +265,5 @@
     .topbar {
         justify-content: flex-end;
     }
+}
 }

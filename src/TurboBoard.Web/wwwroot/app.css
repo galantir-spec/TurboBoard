@@ -1,3 +1,6 @@
+@layer base, components, utilities;
+
+@layer base {
 :root {
     color-scheme: light;
     --font-family-base: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -24,7 +27,7 @@
     --foreground-neutral: var(--neutral-600);
     --primary: var(--monta-500);
     --primary-hover: var(--monta-700);
-    --primary-foreground: var(--base-0);
+    --primary-foreground: var(--base-1000);
     --secondary: var(--neutral-50);
     --secondary-hover: var(--neutral-100);
     --border: var(--neutral-100);
@@ -147,7 +150,9 @@ h1:focus {
     background: hsl(var(--background-brand-subtle));
     color: hsl(var(--foreground));
 }
+}
 
+@layer components {
 .page-heading {
     max-width: 48rem;
 }
@@ -232,4 +237,8 @@ h1:focus {
     .page-heading h1 {
         font-size: 2rem;
     }
+}
+}
+
+@layer utilities {
 }

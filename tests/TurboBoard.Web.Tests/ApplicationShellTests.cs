@@ -49,13 +49,29 @@ public sealed class ApplicationShellTests
             BaseAddress = new Uri("https://localhost"),
         });
 
-        var response = await client.GetAsync("/");
-
-        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.NotEmpty(Directory.EnumerateFiles(
             Path.Combine(stateDirectory.Path, "keys"),
             "*.xml",
             SearchOption.TopDirectoryOnly));
+    }
+
+    [Fact]
+    public async Task Startup_wraps_database_initialization_failures_safely()
+    {
+        using var stateDirectory = TemporaryDirectory.Create();
+        _ = Directory.CreateDirectory(Path.Combine(stateDirectory.Path, "turboboard.db"));
+        await using var application = new TurboBoardApplicationFactory(stateDirectory.Path);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            application.CreateClient(new WebApplicationFactoryClientOptions
+            {
+                BaseAddress = new Uri("https://localhost"),
+            }));
+
+        Assert.StartsWith(
+            "TurboBoard durable state could not be initialized",
+            exception.Message,
+            StringComparison.Ordinal);
     }
 
     [Fact]

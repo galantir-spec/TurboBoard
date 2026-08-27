@@ -1,3 +1,4 @@
+@layer components {
 .card-grid {
     display: grid;
     gap: var(--space-24);
@@ -124,4 +125,5 @@
     .readiness-panel {
         padding: var(--space-24);
     }
+}
 }
