@@ -183,7 +183,7 @@ public sealed class ApplicationShellTests
         var sourceId = Guid.NewGuid();
 
         var preview = await previews.PreviewAsync(dataSourceId, new QueryDefinition(
-            1,
+            QueryDefinition.CurrentVersion,
             new(sourceId, new("sales", "Orders")),
             [new(sourceId, "Id", "OrderId")]));
 

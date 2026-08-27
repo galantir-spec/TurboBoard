@@ -65,65 +65,92 @@ public static partial class QueryEngine
             executableSelections.Add(new(column, selection.OutputName));
         }
 
-        var executableFilters = new List<ExecutableFilter>();
-        foreach (var filter in definition.AvailableFilters)
+        QueryFilterExpression? definitionExpression = definition.FilterExpression;
+        if (definitionExpression is null && definition.AvailableFilters.Count > 0)
         {
-            if (filter.SourceId != definition.Source.Id)
-            {
-                diagnostics.Add(new("query.filter.source-unknown", $"Filter column '{filter.ColumnName}' refers to an unknown source."));
-                continue;
-            }
-
-            var column = source?.Columns.SingleOrDefault(item => string.Equals(item.Name, filter.ColumnName, StringComparison.OrdinalIgnoreCase));
-            if (column is null || !column.Capabilities.HasFlag(SchemaColumnCapabilities.Filter))
-            {
-                diagnostics.Add(new("query.filter.column-unknown", $"Column '{filter.ColumnName}' cannot be filtered in the current Schema."));
-                continue;
-            }
-
-            if (!IsCompatible(column.NormalizedType, filter.Operator))
-            {
-                diagnostics.Add(new("query.filter.operator-incompatible", $"Operator '{filter.Operator}' is not compatible with {column.NormalizedType} column '{column.Name}'."));
-                continue;
-            }
-
-            var requiredCount = RequiredValueCount(filter.Operator);
-            if (filter.Operator is QueryFilterOperator.In or QueryFilterOperator.NotIn && filter.Values.Count == 0)
-            {
-                diagnostics.Add(new("query.filter.values-required", $"Operator '{filter.Operator}' needs at least one value."));
-                continue;
-            }
-            if (requiredCount is not null && filter.Values.Count != requiredCount)
-            {
-                diagnostics.Add(new("query.filter.value-count", $"Operator '{filter.Operator}' needs {requiredCount} value(s)."));
-                continue;
-            }
-
-            var typedValues = new List<object>();
-            var invalid = false;
-            foreach (var value in filter.Values)
-            {
-                if (value is null)
-                {
-                    diagnostics.Add(new("query.filter.null-comparison", "Use IS NULL or IS NOT NULL instead of a null fixed value."));
-                    invalid = true;
-                    break;
-                }
-                if (!TryParseValue(column, value, out var typedValue))
-                {
-                    diagnostics.Add(new("query.filter.value-incompatible", $"Value '{value}' is not valid for {column.NormalizedType} column '{column.Name}'."));
-                    invalid = true;
-                    break;
-                }
-                typedValues.Add(typedValue!);
-            }
-            if (!invalid) executableFilters.Add(new(column, filter.Operator, typedValues));
+            definitionExpression = new QueryFilterGroup(
+                Guid.Empty,
+                true,
+                QueryFilterGroupOperator.And,
+                definition.AvailableFilters.Select(filter => (QueryFilterExpression)new QueryFilterCondition(Guid.Empty, true, filter)).ToArray());
         }
+        var editorIds = new HashSet<Guid>();
+        var executableExpression = PrepareExpression(definitionExpression, definition.Source.Id, source, diagnostics, editorIds, validateIdentity: definition.FilterExpression is not null);
+        var executableFilters = Flatten(executableExpression).ToArray();
 
         return diagnostics.Count == 0 && source is not null
-            ? new(new ExecutableQuery(definition.Source.Id, source, executableSelections, executableFilters), diagnostics)
+            ? new(new ExecutableQuery(definition.Source.Id, source, executableSelections, executableFilters, executableExpression), diagnostics)
             : new(null, diagnostics);
     }
+
+    private static ExecutableFilterExpression? PrepareExpression(
+        QueryFilterExpression? expression,
+        Guid sourceId,
+        SchemaDatabaseObject? source,
+        ICollection<ValidationDiagnostic> diagnostics,
+        ISet<Guid> editorIds,
+        bool validateIdentity)
+    {
+        if (expression is null || !expression.IsEnabled) return null;
+        if (validateIdentity && (expression.Id == Guid.Empty || !editorIds.Add(expression.Id)))
+        {
+            diagnostics.Add(new("query.filter.identity-invalid", "Each enabled filter condition and group needs a unique stable identity."));
+            return null;
+        }
+        switch (expression)
+        {
+            case QueryFilterCondition condition:
+                var filter = PrepareFilter(condition.Filter, sourceId, source, diagnostics);
+                return filter is null ? null : new ExecutableFilterCondition(filter);
+            case QueryFilterNot not:
+                if (not.Operand is null)
+                {
+                    diagnostics.Add(new("query.filter.not-empty", "NOT needs one condition or group."));
+                    return null;
+                }
+                if (!not.Operand.IsEnabled) return null;
+                var operand = PrepareExpression(not.Operand, sourceId, source, diagnostics, editorIds, validateIdentity);
+                return operand is null ? null : new ExecutableFilterNot(operand);
+            case QueryFilterGroup group:
+                if (group.Children.Count == 0)
+                {
+                    diagnostics.Add(new("query.filter.group-empty", $"{group.Operator} group needs at least one condition or group."));
+                    return null;
+                }
+                var children = group.Children.Select(child => PrepareExpression(child, sourceId, source, diagnostics, editorIds, validateIdentity)).Where(child => child is not null).Cast<ExecutableFilterExpression>().ToArray();
+                return children.Length == 0 ? null : new ExecutableFilterGroup(group.Operator, children);
+            default:
+                diagnostics.Add(new("query.filter.expression-unknown", "The filter expression contains an unsupported node."));
+                return null;
+        }
+    }
+
+    private static ExecutableFilter? PrepareFilter(QueryFilter filter, Guid sourceId, SchemaDatabaseObject? source, ICollection<ValidationDiagnostic> diagnostics)
+    {
+        if (filter.SourceId != sourceId) { diagnostics.Add(new("query.filter.source-unknown", $"Filter column '{filter.ColumnName}' refers to an unknown source.")); return null; }
+        var column = source?.Columns.SingleOrDefault(item => string.Equals(item.Name, filter.ColumnName, StringComparison.OrdinalIgnoreCase));
+        if (column is null || !column.Capabilities.HasFlag(SchemaColumnCapabilities.Filter)) { diagnostics.Add(new("query.filter.column-unknown", $"Column '{filter.ColumnName}' cannot be filtered in the current Schema.")); return null; }
+        if (!IsCompatible(column.NormalizedType, filter.Operator)) { diagnostics.Add(new("query.filter.operator-incompatible", $"Operator '{filter.Operator}' is not compatible with {column.NormalizedType} column '{column.Name}'.")); return null; }
+        var requiredCount = RequiredValueCount(filter.Operator);
+        if (filter.Operator is QueryFilterOperator.In or QueryFilterOperator.NotIn && filter.Values.Count == 0) { diagnostics.Add(new("query.filter.values-required", $"Operator '{filter.Operator}' needs at least one value.")); return null; }
+        if (requiredCount is not null && filter.Values.Count != requiredCount) { diagnostics.Add(new("query.filter.value-count", $"Operator '{filter.Operator}' needs {requiredCount} value(s).")); return null; }
+        var typedValues = new List<object>();
+        foreach (var value in filter.Values)
+        {
+            if (value is null) { diagnostics.Add(new("query.filter.null-comparison", "Use IS NULL or IS NOT NULL instead of a null fixed value.")); return null; }
+            if (!TryParseValue(column, value, out var typedValue)) { diagnostics.Add(new("query.filter.value-incompatible", $"Value '{value}' is not valid for {column.NormalizedType} column '{column.Name}'.")); return null; }
+            typedValues.Add(typedValue!);
+        }
+        return new(column, filter.Operator, typedValues);
+    }
+
+    private static IEnumerable<ExecutableFilter> Flatten(ExecutableFilterExpression? expression) => expression switch
+    {
+        ExecutableFilterCondition condition => [condition.Filter],
+        ExecutableFilterGroup group => group.Children.SelectMany(Flatten),
+        ExecutableFilterNot not => Flatten(not.Operand),
+        _ => [],
+    };
 
     public static IReadOnlyList<QueryFilterOperator> OperatorsFor(NormalizedTypeCategory type)
     {

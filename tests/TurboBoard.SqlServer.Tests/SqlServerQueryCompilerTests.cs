@@ -20,7 +20,7 @@ public sealed class SqlServerQueryCompilerTests
                 ]),
         ]);
         var prepared = QueryEngine.Prepare(schema, new QueryDefinition(
-            1,
+            QueryDefinition.CurrentVersion,
             new(sourceId, new("sales", "Order Details")),
             [new(sourceId, "Total", "OrderTotal"), new(sourceId, "Order Id", "OrderId")]));
 
@@ -46,7 +46,7 @@ public sealed class SqlServerQueryCompilerTests
             ]),
         ]);
         var prepared = QueryEngine.Prepare(schema, new QueryDefinition(
-            1,
+            QueryDefinition.CurrentVersion,
             new(sourceId, new("sales", "Orders")),
             [new(sourceId, "OrderId", "OrderId")],
             [
@@ -74,13 +74,37 @@ public sealed class SqlServerQueryCompilerTests
         var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow,
         [new SchemaDatabaseObject(new("dbo", "Items"), DatabaseObjectKind.Table,
         [new SchemaColumn("Code", 1, NormalizedTypeCategory.Text, "nvarchar", false, 3, null, null, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)])]);
-        var prepared = QueryEngine.Prepare(schema, new(1, new(sourceId, new("dbo", "Items")), [new(sourceId, "Code", "Code")], [new(sourceId, "Code", QueryFilterOperator.Contains, ["%_["])]));
+        var prepared = QueryEngine.Prepare(schema, new(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Items")), [new(sourceId, "Code", "Code")], [new(sourceId, "Code", QueryFilterOperator.Contains, ["%_["])]));
 
         var compiled = new SqlServerQueryCompiler().Compile(prepared.Query!, 10);
 
         var parameter = Assert.Single(compiled.Parameters);
         Assert.Equal("%\\%\\_\\[%", parameter.Value);
         Assert.Equal(((string)parameter.Value).Length, parameter.MaximumLength);
+    }
+
+    [Fact]
+    public void Nested_boolean_expression_compiles_with_exact_parentheses_and_parameter_order()
+    {
+        var sourceId = Guid.NewGuid();
+        var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow,
+        [new SchemaDatabaseObject(new("dbo", "Items"), DatabaseObjectKind.Table,
+        [new SchemaColumn("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)])]);
+        var expression = new QueryFilterGroup(Guid.NewGuid(), true, QueryFilterGroupOperator.And,
+        [
+            new QueryFilterCondition(Guid.NewGuid(), true, new(sourceId, "Id", QueryFilterOperator.GreaterThan, ["1"])),
+            new QueryFilterNot(Guid.NewGuid(), true, new QueryFilterGroup(Guid.NewGuid(), true, QueryFilterGroupOperator.Or,
+            [
+                new QueryFilterCondition(Guid.NewGuid(), true, new(sourceId, "Id", QueryFilterOperator.Equal, ["2"])),
+                new QueryFilterCondition(Guid.NewGuid(), true, new(sourceId, "Id", QueryFilterOperator.Equal, ["3"])),
+            ])),
+        ]);
+        var prepared = QueryEngine.Prepare(schema, new(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Items")), [new(sourceId, "Id", "Id")], FilterExpression: expression));
+
+        var compiled = new SqlServerQueryCompiler().Compile(prepared.Query!, 10);
+
+        Assert.Equal("SELECT TOP (11) [q].[Id] AS [Id] FROM [dbo].[Items] AS [q] WHERE [q].[Id] > @p0 AND NOT ([q].[Id] = @p1 OR [q].[Id] = @p2);", compiled.InspectionText);
+        Assert.Equal([1, 2, 3], compiled.Parameters.Select(item => item.Value));
     }
 
     [Fact]
@@ -104,7 +128,7 @@ public sealed class SqlServerQueryCompilerTests
             new(sourceId, "Value", QueryFilterOperator.IsNull, []),
             new(sourceId, "Value", QueryFilterOperator.IsNotNull, []),
         ]).ToArray();
-        var prepared = QueryEngine.Prepare(schema, new(1, new(sourceId, new("dbo", "Items")), [new(sourceId, "Value", "Value")], filters));
+        var prepared = QueryEngine.Prepare(schema, new(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Items")), [new(sourceId, "Value", "Value")], filters));
 
         var compiled = new SqlServerQueryCompiler().Compile(prepared.Query!, 10);
 
@@ -134,7 +158,7 @@ public sealed class SqlServerQueryCompilerTests
         [new SchemaDatabaseObject(new("dbo", "Items"), DatabaseObjectKind.Table,
         [new SchemaColumn("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)])]);
         var values = Enumerable.Range(1, 2101).Select(item => item.ToString()).ToArray();
-        var prepared = QueryEngine.Prepare(schema, new(1, new(sourceId, new("dbo", "Items")), [new(sourceId, "Id", "Id")], [new(sourceId, "Id", QueryFilterOperator.In, values)]));
+        var prepared = QueryEngine.Prepare(schema, new(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Items")), [new(sourceId, "Id", "Id")], [new(sourceId, "Id", QueryFilterOperator.In, values)]));
 
         var exception = Assert.Throws<QueryCompilationException>(() => new SqlServerQueryCompiler().Compile(prepared.Query!, 10));
 

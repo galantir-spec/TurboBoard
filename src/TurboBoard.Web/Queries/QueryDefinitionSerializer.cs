@@ -37,6 +37,7 @@ internal sealed class QueryDefinitionSerializer : IQueryDefinitionSerializer
             return version switch
             {
                 QueryDefinition.CurrentVersion => ReadCurrent(json),
+                1 => ReadVersionOne(json),
                 > QueryDefinition.CurrentVersion => new(
                     null,
                     new(
@@ -57,6 +58,20 @@ internal sealed class QueryDefinitionSerializer : IQueryDefinitionSerializer
         return definition is null
             ? Invalid("The Saved Query contains an empty Query Definition.")
             : new(definition, null);
+    }
+
+    private static QueryDefinitionReadResult ReadVersionOne(string json)
+    {
+        var legacy = JsonSerializer.Deserialize<QueryDefinition>(json, JsonOptions);
+        if (legacy is null) return Invalid("The Saved Query contains an empty Query Definition.");
+        QueryFilterExpression? expression = legacy.AvailableFilters.Count == 0
+            ? null
+            : new QueryFilterGroup(
+                Guid.NewGuid(),
+                true,
+                QueryFilterGroupOperator.And,
+                legacy.AvailableFilters.Select(filter => (QueryFilterExpression)new QueryFilterCondition(Guid.NewGuid(), true, filter)).ToArray());
+        return new(new(QueryDefinition.CurrentVersion, legacy.Source, legacy.Selections, FilterExpression: expression), null);
     }
 
     private static QueryDefinitionReadResult Invalid(string message) =>

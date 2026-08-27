@@ -93,7 +93,7 @@ public sealed class QueryEngineTests
     {
         var sourceId = Guid.NewGuid();
         var schema = SchemaWithOrders();
-        var definition = new QueryDefinition(1, new(sourceId, new("sales", "Orders")), [new(sourceId, "OrderId", "OrderId")],
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("sales", "Orders")), [new(sourceId, "OrderId", "OrderId")],
         [
             new(sourceId, "Missing", QueryFilterOperator.Equal, ["1"]),
             new(sourceId, "OrderId", QueryFilterOperator.Like, ["1"]),
@@ -136,7 +136,7 @@ public sealed class QueryEngineTests
         var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow,
         [new SchemaDatabaseObject(new("dbo", "Values"), DatabaseObjectKind.Table,
         [new SchemaColumn("Number", 1, NormalizedTypeCategory.Integer, providerType, false, 8, 19, 0, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)])]);
-        var definition = new QueryDefinition(1, new(sourceId, new("dbo", "Values")), [new(sourceId, "Number", "Number")], [new(sourceId, "Number", QueryFilterOperator.Equal, [value])]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Values")), [new(sourceId, "Number", "Number")], [new(sourceId, "Number", QueryFilterOperator.Equal, [value])]);
 
         var result = QueryEngine.Prepare(schema, definition);
 
@@ -153,7 +153,7 @@ public sealed class QueryEngineTests
             new SchemaColumn("Label", 1, NormalizedTypeCategory.Text, "nvarchar", true, 3, null, null, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter),
             new SchemaColumn("Amount", 2, NormalizedTypeCategory.Decimal, "decimal", false, 9, 5, 2, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter),
         ])]);
-        var definition = new QueryDefinition(1, new(sourceId, new("dbo", "Values")), [new(sourceId, "Label", "Label")],
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Values")), [new(sourceId, "Label", "Label")],
         [
             new(sourceId, "Label", QueryFilterOperator.Equal, ["four"]),
             new(sourceId, "Amount", QueryFilterOperator.Equal, ["1234.567"]),
@@ -171,7 +171,7 @@ public sealed class QueryEngineTests
         var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow,
         [new SchemaDatabaseObject(new("dbo", "Values"), DatabaseObjectKind.Table,
         [new SchemaColumn("Ratio", 1, NormalizedTypeCategory.Decimal, "decimal", false, 5, 2, 2, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)])]);
-        var definition = new QueryDefinition(1, new(sourceId, new("dbo", "Values")), [new(sourceId, "Ratio", "Ratio")], [new(sourceId, "Ratio", QueryFilterOperator.Equal, ["0.12"])]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Values")), [new(sourceId, "Ratio", "Ratio")], [new(sourceId, "Ratio", QueryFilterOperator.Equal, ["0.12"])]);
 
         var result = QueryEngine.Prepare(schema, definition);
 
@@ -192,7 +192,7 @@ public sealed class QueryEngineTests
         var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow,
         [new SchemaDatabaseObject(new("dbo", "Events"), DatabaseObjectKind.Table,
         [new SchemaColumn("OccurredAt", 1, normalizedType, providerType, false, null, null, null, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)])]);
-        var definition = new QueryDefinition(1, new(sourceId, new("dbo", "Events")), [new(sourceId, "OccurredAt", "OccurredAt")], [new(sourceId, "OccurredAt", QueryFilterOperator.Equal, [value])]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Events")), [new(sourceId, "OccurredAt", "OccurredAt")], [new(sourceId, "OccurredAt", QueryFilterOperator.Equal, [value])]);
 
         var result = QueryEngine.Prepare(schema, definition);
 
@@ -210,7 +210,7 @@ public sealed class QueryEngineTests
         var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow,
         [new SchemaDatabaseObject(new("dbo", "Events"), DatabaseObjectKind.Table,
         [new SchemaColumn("OccurredAt", 1, NormalizedTypeCategory.DateTime, providerType, false, null, null, null, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)])]);
-        var definition = new QueryDefinition(1, new(sourceId, new("dbo", "Events")), [new(sourceId, "OccurredAt", "OccurredAt")], [new(sourceId, "OccurredAt", QueryFilterOperator.Equal, [value])]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Events")), [new(sourceId, "OccurredAt", "OccurredAt")], [new(sourceId, "OccurredAt", QueryFilterOperator.Equal, [value])]);
 
         var result = QueryEngine.Prepare(schema, definition);
 
@@ -229,7 +229,7 @@ public sealed class QueryEngineTests
         var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow,
         [new SchemaDatabaseObject(new("dbo", "Values"), DatabaseObjectKind.Table,
         [new SchemaColumn("Measurement", 1, NormalizedTypeCategory.FloatingPoint, providerType, false, 8, precision, null, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)])]);
-        var definition = new QueryDefinition(1, new(sourceId, new("dbo", "Values")), [new(sourceId, "Measurement", "Measurement")], [new(sourceId, "Measurement", QueryFilterOperator.Equal, [value])]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Values")), [new(sourceId, "Measurement", "Measurement")], [new(sourceId, "Measurement", QueryFilterOperator.Equal, [value])]);
 
         var result = QueryEngine.Prepare(schema, definition);
 
@@ -246,7 +246,7 @@ public sealed class QueryEngineTests
         var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow,
         [new SchemaDatabaseObject(new("dbo", "Values"), DatabaseObjectKind.Table,
         [new SchemaColumn("Measurement", 1, NormalizedTypeCategory.FloatingPoint, providerType, false, 8, precision, null, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)])]);
-        var definition = new QueryDefinition(1, new(sourceId, new("dbo", "Values")), [new(sourceId, "Measurement", "Measurement")], [new(sourceId, "Measurement", QueryFilterOperator.Equal, ["12.5"])]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Values")), [new(sourceId, "Measurement", "Measurement")], [new(sourceId, "Measurement", QueryFilterOperator.Equal, ["12.5"])]);
 
         var result = QueryEngine.Prepare(schema, definition);
 
@@ -265,7 +265,7 @@ public sealed class QueryEngineTests
         var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow,
         [new SchemaDatabaseObject(new("dbo", "Values"), DatabaseObjectKind.Table,
         [new SchemaColumn("Amount", 1, NormalizedTypeCategory.Decimal, providerType, false, 8, precision, scale, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)])]);
-        var definition = new QueryDefinition(1, new(sourceId, new("dbo", "Values")), [new(sourceId, "Amount", "Amount")], [new(sourceId, "Amount", QueryFilterOperator.Equal, [value])]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Values")), [new(sourceId, "Amount", "Amount")], [new(sourceId, "Amount", QueryFilterOperator.Equal, [value])]);
 
         var result = QueryEngine.Prepare(schema, definition);
 
@@ -281,9 +281,65 @@ public sealed class QueryEngineTests
         var schema = new DataSourceSchema(Guid.NewGuid(), DateTimeOffset.UtcNow,
         [new SchemaDatabaseObject(new("dbo", "Values"), DatabaseObjectKind.Table,
         [new SchemaColumn("Amount", 1, NormalizedTypeCategory.Decimal, providerType, false, 8, precision, scale, SchemaColumnCapabilities.Select | SchemaColumnCapabilities.Filter)])]);
-        var definition = new QueryDefinition(1, new(sourceId, new("dbo", "Values")), [new(sourceId, "Amount", "Amount")], [new(sourceId, "Amount", QueryFilterOperator.Equal, [value])]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("dbo", "Values")), [new(sourceId, "Amount", "Amount")], [new(sourceId, "Amount", QueryFilterOperator.Equal, [value])]);
 
         Assert.True(QueryEngine.Prepare(schema, definition).IsValid);
+    }
+
+    [Fact]
+    public void Nested_boolean_expression_lowers_without_flattening_its_meaning()
+    {
+        var sourceId = Guid.NewGuid();
+        var first = new QueryFilter(sourceId, "OrderId", QueryFilterOperator.GreaterThan, ["10"]);
+        var second = new QueryFilter(sourceId, "OrderId", QueryFilterOperator.LessThan, ["20"]);
+        var expression = new QueryFilterGroup(Guid.NewGuid(), true, QueryFilterGroupOperator.Or,
+        [
+            new QueryFilterCondition(Guid.NewGuid(), true, first),
+            new QueryFilterNot(Guid.NewGuid(), true, new QueryFilterCondition(Guid.NewGuid(), true, second)),
+        ]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("sales", "Orders")), [new(sourceId, "OrderId", "OrderId")], FilterExpression: expression);
+
+        var result = QueryEngine.Prepare(SchemaWithOrders(), definition);
+
+        Assert.True(result.IsValid);
+        var group = Assert.IsType<ExecutableFilterGroup>(result.Query!.FilterExpression);
+        Assert.Equal(QueryFilterGroupOperator.Or, group.Operator);
+        Assert.IsType<ExecutableFilterNot>(group.Children[1]);
+    }
+
+    [Fact]
+    public void Disabled_invalid_branches_are_preserved_but_do_not_validate_or_execute()
+    {
+        var sourceId = Guid.NewGuid();
+        var disabled = new QueryFilterCondition(Guid.NewGuid(), false, new(sourceId, "Missing", QueryFilterOperator.Equal, ["bad"]));
+        var disabledGroup = new QueryFilterGroup(Guid.NewGuid(), true, QueryFilterGroupOperator.And, [disabled]);
+        var expression = new QueryFilterGroup(Guid.NewGuid(), true, QueryFilterGroupOperator.And, [new QueryFilterNot(Guid.NewGuid(), true, disabledGroup)]);
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("sales", "Orders")), [new(sourceId, "OrderId", "OrderId")], FilterExpression: expression);
+
+        var result = QueryEngine.Prepare(SchemaWithOrders(), definition);
+
+        Assert.True(result.IsValid);
+        Assert.Empty(result.Query!.Filters);
+        Assert.Null(result.Query.FilterExpression);
+        var json = System.Text.Json.JsonSerializer.Serialize(definition);
+        var roundTrip = System.Text.Json.JsonSerializer.Deserialize<QueryDefinition>(json)!;
+        var restored = Assert.IsType<QueryFilterGroup>(roundTrip.FilterExpression);
+        var restoredNot = Assert.IsType<QueryFilterNot>(restored.Children[0]);
+        var restoredGroup = Assert.IsType<QueryFilterGroup>(restoredNot.Operand);
+        Assert.False(Assert.IsType<QueryFilterCondition>(restoredGroup.Children[0]).IsEnabled);
+    }
+
+    [Fact]
+    public void Empty_groups_return_a_focused_diagnostic()
+    {
+        var sourceId = Guid.NewGuid();
+        var definition = new QueryDefinition(QueryDefinition.CurrentVersion, new(sourceId, new("sales", "Orders")), [new(sourceId, "OrderId", "OrderId")],
+            FilterExpression: new QueryFilterGroup(Guid.NewGuid(), true, QueryFilterGroupOperator.Or, []));
+
+        var result = QueryEngine.Prepare(SchemaWithOrders(), definition);
+
+        Assert.False(result.IsValid);
+        Assert.Equal("query.filter.group-empty", Assert.Single(result.Diagnostics).Code);
     }
 
     private static DataSourceSchema SchemaWithOrders() =>

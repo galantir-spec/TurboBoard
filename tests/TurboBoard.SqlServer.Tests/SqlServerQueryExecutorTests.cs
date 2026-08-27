@@ -40,7 +40,7 @@ public sealed class SqlServerQueryExecutorTests
         var sourceId = Guid.NewGuid();
         var prepared = QueryEngine.Prepare(
             new(Guid.NewGuid(), DateTimeOffset.UtcNow, discovered.Objects!, discovered.Relationships),
-            new(1, new(sourceId, source.QualifiedName), [new(sourceId, column.Name, "Value0")]));
+            new(QueryDefinition.CurrentVersion, new(sourceId, source.QualifiedName), [new(sourceId, column.Name, "Value0")]));
         var compiled = new SqlServerQueryCompiler().Compile(prepared.Query!, 1);
 
         var result = await new SqlServerQueryExecutor().ExecuteAsync(request, compiled);

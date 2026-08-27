@@ -80,9 +80,9 @@ public sealed class QueriesComponentTests
         component.FindAll("select")[2].Change("sales.Orders");
         Assert.Contains("Every value is sent to the database as a parameter", component.Markup, StringComparison.Ordinal);
 
-        component.FindAll("button").Single(button => button.TextContent.Trim() == "Add filter").Click();
+        component.FindAll("button").Single(button => button.TextContent.Trim() == "Add condition").Click();
 
-        var operatorSelect = component.FindAll("select")[4];
+        var operatorSelect = component.FindAll("select")[5];
         Assert.Contains("Between", operatorSelect.TextContent, StringComparison.Ordinal);
         Assert.DoesNotContain("Like", operatorSelect.TextContent, StringComparison.Ordinal);
     }
@@ -97,14 +97,14 @@ public sealed class QueriesComponentTests
         component.FindAll("select")[2].Change("sales.Orders");
         component.Find("input[maxlength='200']").Input("Filtered orders");
         component.Find("input[type='checkbox']").Change(true);
-        component.FindAll("button").Single(button => button.TextContent.Trim() == "Add filter").Click();
-        component.Find(".filter-row input").Input("42");
+        component.FindAll("button").Single(button => button.TextContent.Trim() == "Add condition").Click();
+        component.Find(".filter-row input:not([type='checkbox'])").Input("42");
 
         component.FindAll("button").Single(button => button.TextContent.Trim() == "Run preview").Click();
         component.FindAll("button").Single(button => button.TextContent.Trim() == "Save As").Click();
 
-        var previewFilter = Assert.Single(previews!.LastDefinition!.AvailableFilters);
-        var savedFilter = Assert.Single(savedQueries.LastDraft!.Definition.AvailableFilters);
+        var previewFilter = Assert.IsType<QueryFilterCondition>(Assert.IsType<QueryFilterGroup>(previews!.LastDefinition!.FilterExpression).Children.Single()).Filter;
+        var savedFilter = Assert.IsType<QueryFilterCondition>(Assert.IsType<QueryFilterGroup>(savedQueries.LastDraft!.Definition.FilterExpression).Children.Single()).Filter;
         Assert.Equal(QueryFilterOperator.Equal, previewFilter.Operator);
         Assert.Equal("42", Assert.Single(previewFilter.Values));
         Assert.Equal(previewFilter.SourceId, savedFilter.SourceId);
@@ -120,17 +120,51 @@ public sealed class QueriesComponentTests
         var component = context.Render<QueriesPage>();
         component.FindAll("select")[1].Change(TestDataSource.Id.ToString());
         component.FindAll("select")[2].Change("sales.Orders");
-        component.FindAll("button").Single(button => button.TextContent.Trim() == "Add filter").Click();
-        var operatorSelect = component.FindAll("select")[4];
+        component.FindAll("button").Single(button => button.TextContent.Trim() == "Add condition").Click();
+        var operatorSelect = component.FindAll("select")[5];
 
         operatorSelect.Change(QueryFilterOperator.Between.ToString());
         Assert.Equal(2, component.FindAll("input:not([maxlength]):not([type='checkbox'])").Count);
 
-        component.FindAll("select")[4].Change(QueryFilterOperator.In.ToString());
+        component.FindAll("select")[5].Change(QueryFilterOperator.In.ToString());
         Assert.Contains("comma separated", component.Markup, StringComparison.Ordinal);
 
-        component.FindAll("select")[4].Change(QueryFilterOperator.IsNull.ToString());
+        component.FindAll("select")[5].Change(QueryFilterOperator.IsNull.ToString());
         Assert.Empty(component.FindAll("input:not([maxlength]):not([type='checkbox'])"));
+    }
+
+    [Fact]
+    public void Filter_editor_regroups_duplicates_disables_and_removes_nodes()
+    {
+        using var context = CreateContext(out var savedQueries);
+        var component = context.Render<QueriesPage>();
+        component.FindAll("select")[1].Change(TestDataSource.Id.ToString());
+        component.FindAll("select")[2].Change("sales.Orders");
+        component.Find("input[maxlength='200']").Input("Grouped orders");
+        component.Find("input[type='checkbox']").Change(true);
+
+        var addCondition = component.FindAll("button").Single(button => button.TextContent.Trim() == "Add condition");
+        addCondition.Click();
+        component.Find(".filter-row button:nth-last-child(2)").Click();
+        var rows = component.FindAll(".filter-row");
+        Assert.Equal(2, rows.Count);
+        rows[0].QuerySelector("input[type='checkbox']")!.Change(true);
+        rows = component.FindAll(".filter-row");
+        rows[1].QuerySelector("input[type='checkbox']")!.Change(true);
+        component.FindAll("button").Single(button => button.TextContent.Trim() == "Group selected").Click();
+
+        rows = component.FindAll(".filter-row");
+        Assert.Equal(3, rows.Count);
+        rows[1].QuerySelectorAll("input[type='checkbox']")[1].Change(false);
+        rows = component.FindAll(".filter-row");
+        rows[2].QuerySelector("button.filter-remove")!.Click();
+        component.FindAll("button").Single(button => button.TextContent.Trim() == "Save As").Click();
+
+        var root = Assert.IsType<QueryFilterGroup>(savedQueries.LastDraft!.Definition.FilterExpression);
+        var nested = Assert.IsType<QueryFilterGroup>(Assert.Single(root.Children));
+        var condition = Assert.IsType<QueryFilterCondition>(Assert.Single(nested.Children));
+        Assert.False(condition.IsEnabled);
+        Assert.NotEqual(Guid.Empty, condition.Id);
     }
 
     [Fact]

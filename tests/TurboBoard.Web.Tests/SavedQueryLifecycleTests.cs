@@ -122,6 +122,22 @@ public sealed class SavedQueryLifecycleTests
     }
 
     [Fact]
+    public async Task Version_one_definitions_migrate_legacy_filters_to_the_current_expression_tree()
+    {
+        using var database = TemporaryDatabase.Create();
+        await using var host = await SavedQueryTestHost.CreateAsync(database.Path);
+        const string legacyJson = "{\"version\":1,\"source\":{\"id\":\"11111111-1111-1111-1111-111111111111\",\"object\":{\"schema\":\"sales\",\"name\":\"Orders\"}},\"selections\":[{\"sourceId\":\"11111111-1111-1111-1111-111111111111\",\"columnName\":\"Id\",\"outputName\":\"Id\"}],\"filters\":[{\"sourceId\":\"11111111-1111-1111-1111-111111111111\",\"columnName\":\"Id\",\"operator\":0,\"values\":[\"42\"]}]}";
+
+        var result = host.Deserialize(legacyJson);
+
+        Assert.Null(result.Diagnostic);
+        Assert.Equal(QueryDefinition.CurrentVersion, result.Definition?.Version);
+        var group = Assert.IsType<QueryFilterGroup>(result.Definition?.FilterExpression);
+        Assert.IsType<QueryFilterCondition>(Assert.Single(group.Children));
+        Assert.Empty(result.Definition!.AvailableFilters);
+    }
+
+    [Fact]
     public async Task Unsupported_definition_metadata_can_be_edited_without_rewriting_its_json()
     {
         using var database = TemporaryDatabase.Create();

@@ -17,8 +17,10 @@ select:focus-visible, input:focus-visible, button:focus-visible { outline: var(-
 .field-option span { display: grid; }
 .field-option small, .muted, .panel-heading span { color: hsl(var(--foreground-neutral)); }
 .selection-row { align-items: end; border-top: var(--border-width-md) solid hsl(var(--border)); display: grid; gap: var(--space-12); grid-template-columns: auto minmax(8rem, .75fr) minmax(12rem, 1fr) auto; padding: var(--space-12) 0; }
-.filter-row { align-items: end; border-top: var(--border-width-md) solid hsl(var(--border)); display: grid; gap: var(--space-12); grid-template-columns: repeat(4, minmax(8rem, 1fr)) auto; padding: var(--space-12) 0; }
+.filter-row { align-items: end; border-top: var(--border-width-md) solid hsl(var(--border)); display: grid; gap: var(--space-12); grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); padding: var(--space-12) 0; }
 .filter-row label { min-width: 0; }
+.filter-toggle { align-items: center; display: flex !important; min-height: 2.75rem; }
+.filter-toggle input { min-height: 1.25rem; width: 1.25rem; }
 .filter-remove { background: hsl(var(--secondary)); border: var(--border-width-md) solid hsl(var(--border)); border-radius: var(--radius-md); color: hsl(var(--foreground)); min-height: 2.5rem; min-width: 2.5rem; }
 .drag-index { align-items: center; background: hsl(var(--background-neutral)); border-radius: var(--radius-max); display: inline-flex; height: 2rem; justify-content: center; width: 2rem; }
 .row-actions { display: flex; gap: var(--space-4); }

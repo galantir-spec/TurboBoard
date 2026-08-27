@@ -22,14 +22,33 @@ public sealed class SqlServerQueryCompiler : IQueryCompiler
         var selections = query.Selections.Select(selection =>
             $"[q].{quote.QuoteIdentifier(selection.Column.Name)} AS {quote.QuoteIdentifier(selection.OutputName)}");
         var parameters = new List<QueryParameterSpecification>();
-        var predicates = query.Filters.Select(filter => CompileFilter(filter, quote, parameters)).ToArray();
+        var predicate = CompileExpression(query.FilterExpression, quote, parameters, wrapGroup: false);
         if (parameters.Count > MaximumParameterCount)
             throw new QueryCompilationException([new("query.filter.parameter-limit", $"SQL Server supports at most {MaximumParameterCount:N0} parameters in one Query Preview. Reduce the filter values.")]);
-        var where = predicates.Length == 0 ? string.Empty : $" WHERE {string.Join(" AND ", predicates)}";
+        var where = predicate is null ? string.Empty : $" WHERE {predicate}";
         var commandText = $"SELECT TOP ({previewLimit + 1}) {string.Join(", ", selections)} " +
             $"FROM {quote.QuoteIdentifier(query.Source.QualifiedName.Schema)}.{quote.QuoteIdentifier(query.Source.QualifiedName.Name)} AS [q]{where};";
         return new SqlServerCompiledQuery(commandText, previewLimit, columns, parameters);
     }
+
+    private static string? CompileExpression(
+        ExecutableFilterExpression? expression,
+        SqlCommandBuilder quote,
+        List<QueryParameterSpecification> parameters,
+        bool wrapGroup = true) => expression switch
+    {
+        null => null,
+        ExecutableFilterCondition condition => CompileFilter(condition.Filter, quote, parameters),
+        ExecutableFilterNot not => $"NOT ({CompileExpression(not.Operand, quote, parameters, wrapGroup: false)})",
+        ExecutableFilterGroup group => WrapGroup(
+            string.Join(
+                group.Operator == QueryFilterGroupOperator.And ? " AND " : " OR ",
+                group.Children.Select(child => CompileExpression(child, quote, parameters))),
+            wrapGroup),
+        _ => throw new InvalidOperationException("Unsupported validated filter expression."),
+    };
+
+    private static string WrapGroup(string predicate, bool wrapGroup) => wrapGroup ? $"({predicate})" : predicate;
 
     private static string CompileFilter(ExecutableFilter filter, SqlCommandBuilder quote, List<QueryParameterSpecification> parameters)
     {
