@@ -102,8 +102,8 @@
       },
       "Microsoft.Extensions.DependencyInjection.Abstractions": {
         "type": "Transitive",
-        "resolved": "10.0.0",
-        "contentHash": "L3AdmZ1WOK4XXT5YFPEwyt0ep6l8lGIPs7F5OOBZc77Zqeo01Of7XXICy47628sdVl0v/owxYJTe86DTgFwKCA=="
+        "resolved": "10.0.11",
+        "contentHash": "/a1aJz4m7ylhEDf25ugQChLQoN5XwoGjWw/BoR/ZWWKsO1v4DdJElS1uyngahz4B/eOzjFk1KNTkarRLE5wsIg=="
       },
       "Microsoft.Extensions.Logging.Abstractions": {
         "type": "Transitive",
@@ -278,6 +278,7 @@
         "type": "Project",
         "dependencies": {
           "Microsoft.Data.SqlClient": "[7.0.2, )",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.11, )",
           "TurboBoard.Core": "[1.0.0, )"
         }
       }

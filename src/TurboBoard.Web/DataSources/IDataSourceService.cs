@@ -1,4 +1,4 @@
-using TurboBoard.SqlServer;
+using TurboBoard.Core.DataSources;
 
 namespace TurboBoard.Web.DataSources;
 
@@ -13,7 +13,7 @@ public interface IDataSourceService
         DataSourceDraft draft,
         CancellationToken cancellationToken = default);
 
-    Task<SqlServerConnectionTestResult> TestAsync(
+    Task<DataSourceConnectionTestResult> TestAsync(
         Guid? id,
         DataSourceDraft draft,
         CancellationToken cancellationToken = default);

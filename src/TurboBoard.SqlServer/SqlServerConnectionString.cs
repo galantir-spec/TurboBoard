@@ -1,4 +1,5 @@
 using Microsoft.Data.SqlClient;
+using TurboBoard.Core.DataSources;
 
 namespace TurboBoard.SqlServer;
 
@@ -10,8 +11,8 @@ public static class SqlServerConnectionString
 
         var builder = settings.Mode switch
         {
-            SqlServerConnectionMode.Structured => CreateStructured(settings),
-            SqlServerConnectionMode.Advanced => new SqlConnectionStringBuilder(settings.ConnectionString),
+            DataSourceConnectionMode.Structured => CreateStructured(settings),
+            DataSourceConnectionMode.Advanced => new SqlConnectionStringBuilder(settings.ConnectionString),
             _ => throw new ArgumentOutOfRangeException(nameof(settings), settings.Mode, "Unsupported connection mode."),
         };
 

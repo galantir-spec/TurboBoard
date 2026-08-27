@@ -68,7 +68,7 @@ else
                 }
                 <dl>
                     <div><dt>Target</dt><dd>@source.Target</dd></div>
-                    <div><dt>Configuration</dt><dd>@(source.Mode == SqlServerConnectionMode.Structured ? "Structured settings" : "Advanced mode")</dd></div>
+                    <div><dt>Configuration</dt><dd>@(source.Mode == DataSourceConnectionMode.Structured ? "Structured settings" : "Advanced mode")</dd></div>
                 </dl>
                 @if (source.TrustServerCertificate)
                 {
@@ -106,12 +106,13 @@ else
         </div>
 
         <EditForm Model="draft" OnSubmit="SaveAsync" FormName="data-source-editor">
+            <p class="required-note"><span aria-hidden="true">*</span> Required field</p>
             <div class="form-section">
                 <h3>Identity</h3>
                 <div class="form-grid">
                     <label class="field">
                         <span>Name <strong aria-hidden="true">*</strong></span>
-                        <input @bind="draft.Name" @bind:event="oninput" maxlength="200" autocomplete="off" />
+                        <input @bind="draft.Name" @bind:event="oninput" maxlength="200" autocomplete="off" required aria-required="true" />
                     </label>
                     <label class="field field-wide">
                         <span>Description</span>
@@ -124,28 +125,28 @@ else
                 <h3>Connection mode</h3>
                 <InputRadioGroup @bind-Value="draft.Mode" Name="connection-mode" class="mode-options">
                     <label class="mode-option">
-                        <InputRadio Value="SqlServerConnectionMode.Structured" />
+                        <InputRadio Value="DataSourceConnectionMode.Structured" />
                         <span><strong>Structured settings</strong><small>Recommended for standard SQL Server deployments.</small></span>
                     </label>
                     <label class="mode-option">
-                        <InputRadio Value="SqlServerConnectionMode.Advanced" />
+                        <InputRadio Value="DataSourceConnectionMode.Advanced" />
                         <span><strong>Advanced connection string</strong><small>For settings unavailable in the structured editor.</small></span>
                     </label>
                 </InputRadioGroup>
             </div>
 
-            @if (draft.Mode == SqlServerConnectionMode.Structured)
+            @if (draft.Mode == DataSourceConnectionMode.Structured)
             {
                 <div class="form-section">
                     <h3>SQL Server settings</h3>
                     <div class="form-grid">
                         <label class="field">
                             <span>Server or instance <strong aria-hidden="true">*</strong></span>
-                            <input @bind="draft.Server" @bind:event="oninput" autocomplete="off" placeholder="sql.example.internal" />
+                            <input @bind="draft.Server" @bind:event="oninput" autocomplete="off" placeholder="sql.example.internal" required aria-required="true" />
                         </label>
                         <label class="field">
                             <span>Database <strong aria-hidden="true">*</strong></span>
-                            <input @bind="draft.Database" @bind:event="oninput" autocomplete="off" placeholder="Analytics" />
+                            <input @bind="draft.Database" @bind:event="oninput" autocomplete="off" placeholder="Analytics" required aria-required="true" />
                         </label>
                     </div>
                     <label class="check-field">
@@ -157,11 +158,11 @@ else
                         <div class="form-grid credentials-grid">
                             <label class="field">
                                 <span>Login name <strong aria-hidden="true">*</strong></span>
-                                <input @bind="draft.UserName" @bind:event="oninput" autocomplete="username" />
+                                <input @bind="draft.UserName" @bind:event="oninput" autocomplete="username" required aria-required="true" />
                             </label>
                             <label class="field">
-                                <span>Password <strong aria-hidden="true">*</strong></span>
-                                <input type="password" @bind="draft.Password" @bind:event="oninput" autocomplete="new-password" />
+                                <span>Password @if (!hasStoredSecret) { <strong aria-hidden="true">*</strong> }</span>
+                                <input type="password" @bind="draft.Password" @bind:event="oninput" autocomplete="new-password" required="@(!hasStoredSecret)" aria-required="@(!hasStoredSecret)" />
                                 @if (hasStoredSecret)
                                 {
                                     <small>Leave empty to keep the saved password.</small>
@@ -176,8 +177,8 @@ else
                 <div class="form-section">
                     <h3>Advanced settings</h3>
                     <label class="field">
-                        <span>Connection string <strong aria-hidden="true">*</strong></span>
-                        <textarea class="secret-input" @bind="draft.ConnectionString" @bind:event="oninput" rows="5" autocomplete="off" spellcheck="false"></textarea>
+                        <span>Connection string @if (!hasStoredSecret) { <strong aria-hidden="true">*</strong> }</span>
+                        <textarea class="secret-input" @bind="draft.ConnectionString" @bind:event="oninput" rows="5" autocomplete="off" spellcheck="false" required="@(!hasStoredSecret)" aria-required="@(!hasStoredSecret)"></textarea>
                         <small>@(hasStoredSecret ? "The saved connection string is not shown. Leave empty to keep it." : "The complete value is encrypted before it is saved.")</small>
                     </label>
                 </div>
@@ -230,7 +231,7 @@ else
     private DataSourceDraft? draft;
     private Guid? editingId;
     private Guid? deleteCandidateId;
-    private SqlServerConnectionTestResult? testResult;
+    private DataSourceConnectionTestResult? testResult;
     private string? pageError;
     private bool hasStoredSecret;
     private bool isLoading = true;
@@ -238,8 +239,8 @@ else
     private bool isTesting;
 
     private bool IsBusy => isSaving || isTesting;
-    private string TestFeedbackClass => testResult?.Status == SqlServerConnectionTestStatus.Succeeded ? "feedback-success" : testResult?.Status == SqlServerConnectionTestStatus.Cancelled ? "feedback-neutral" : "feedback-error";
-    private string TestFeedbackTitle => testResult?.Status == SqlServerConnectionTestStatus.Succeeded ? "Connection verified" : testResult?.Status == SqlServerConnectionTestStatus.Cancelled ? "Test cancelled" : "Connection not verified";
+    private string TestFeedbackClass => testResult?.Status == DataSourceConnectionTestStatus.Succeeded ? "feedback-success" : testResult?.Status == DataSourceConnectionTestStatus.Cancelled ? "feedback-neutral" : "feedback-error";
+    private string TestFeedbackTitle => testResult?.Status == DataSourceConnectionTestStatus.Succeeded ? "Connection verified" : testResult?.Status == DataSourceConnectionTestStatus.Cancelled ? "Test cancelled" : "Connection not verified";
 
     protected override async Task OnInitializedAsync() => await RefreshAsync();
 

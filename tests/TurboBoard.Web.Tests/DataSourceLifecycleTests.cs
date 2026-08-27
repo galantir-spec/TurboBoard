@@ -3,8 +3,8 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using TurboBoard.Core.DataSources;
 using TurboBoard.Persistence;
-using TurboBoard.SqlServer;
 using TurboBoard.Web.DataSources;
 
 namespace TurboBoard.Web.Tests;
@@ -59,7 +59,7 @@ public sealed class DataSourceLifecycleTests
         await host.WithServiceAsync(service => service.SaveAsync(id, edit));
         await host.WithServiceAsync(service => service.TestAsync(id, edit));
 
-        Assert.Equal("keep-me", tester.LastSettings?.Password);
+        Assert.Equal("keep-me", tester.LastRequest?.Secret);
     }
 
     [Fact]
@@ -76,8 +76,10 @@ public sealed class DataSourceLifecycleTests
         var result = await host.WithServiceAsync(service => service.TestAsync(null, draft));
         var saved = await host.WithServiceAsync(service => service.ListAsync());
 
-        Assert.Equal(SqlServerConnectionTestStatus.Succeeded, result.Status);
-        Assert.Equal("sql.internal", tester.LastSettings?.Server);
+        Assert.Equal(DataSourceConnectionTestStatus.Succeeded, result.Status);
+        Assert.Equal(
+            "sql.internal",
+            tester.LastRequest?.Properties[DataSourceConnectionPropertyNames.Endpoint]);
         Assert.Empty(saved);
     }
 
@@ -98,7 +100,7 @@ public sealed class DataSourceLifecycleTests
 
         var result = await host.WithServiceAsync(service => service.TestAsync(null, draft));
 
-        Assert.Equal(SqlServerConnectionTestStatus.UnexpectedFailure, result.Status);
+        Assert.Equal(DataSourceConnectionTestStatus.UnexpectedFailure, result.Status);
         Assert.Equal("TurboBoard could not test this Data Source. Review the settings and try again.", result.Message);
         Assert.DoesNotContain("do-not-log", logs.MessagesText, StringComparison.Ordinal);
         Assert.DoesNotContain("private-sql", logs.MessagesText, StringComparison.Ordinal);
@@ -123,23 +125,27 @@ public sealed class DataSourceLifecycleTests
         Assert.Empty(remaining);
     }
 
-    private sealed class RecordingConnectionTester : ISqlServerConnectionTester
+    private sealed class RecordingConnectionTester : IDataSourceConnectionTester
     {
-        public SqlServerConnectionSettings? LastSettings { get; private set; }
+        public string ProviderKey => "sql-server";
 
-        public Task<SqlServerConnectionTestResult> TestAsync(
-            SqlServerConnectionSettings settings,
+        public DataSourceConnectionRequest? LastRequest { get; private set; }
+
+        public Task<DataSourceConnectionTestResult> TestAsync(
+            DataSourceConnectionRequest request,
             CancellationToken cancellationToken = default)
         {
-            LastSettings = settings;
-            return Task.FromResult(SqlServerConnectionTestResult.Succeeded());
+            LastRequest = request;
+            return Task.FromResult(DataSourceConnectionTestResult.Succeeded());
         }
     }
 
-    private sealed class ThrowingConnectionTester(string message) : ISqlServerConnectionTester
+    private sealed class ThrowingConnectionTester(string message) : IDataSourceConnectionTester
     {
-        public Task<SqlServerConnectionTestResult> TestAsync(
-            SqlServerConnectionSettings settings,
+        public string ProviderKey => "sql-server";
+
+        public Task<DataSourceConnectionTestResult> TestAsync(
+            DataSourceConnectionRequest request,
             CancellationToken cancellationToken = default) =>
             throw new InvalidOperationException(message);
     }
@@ -161,7 +167,7 @@ public sealed class DataSourceLifecycleTests
         }
 
         public static async Task<DataSourceTestHost> CreateAsync(
-            ISqlServerConnectionTester? tester = null,
+            IDataSourceConnectionTester? tester = null,
             ILoggerProvider? loggerProvider = null)
         {
             var stateDirectory = Directory.CreateTempSubdirectory("TurboBoardDataSources-").FullName;
@@ -180,7 +186,8 @@ public sealed class DataSourceLifecycleTests
                 }
             });
             serviceCollection.AddTurboBoardPersistence(databasePath);
-            serviceCollection.AddSingleton(tester ?? new RecordingConnectionTester());
+            serviceCollection.AddSingleton<IDataSourceConnectionTester>(
+                tester ?? new RecordingConnectionTester());
             serviceCollection.AddTurboBoardDataSources();
 
             var services = serviceCollection.BuildServiceProvider();

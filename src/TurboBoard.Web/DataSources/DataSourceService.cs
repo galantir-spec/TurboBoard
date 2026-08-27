@@ -1,8 +1,8 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
+using TurboBoard.Core.DataSources;
 using TurboBoard.Persistence;
-using TurboBoard.SqlServer;
 
 namespace TurboBoard.Web.DataSources;
 
@@ -14,18 +14,18 @@ internal sealed class DataSourceService : IDataSourceService
     private static readonly EventId ConnectionTestFailed = new(2101, nameof(ConnectionTestFailed));
 
     private readonly IDbContextFactory<TurboBoardDbContext> contextFactory;
-    private readonly ISqlServerConnectionTester connectionTester;
+    private readonly DataSourceProviderRegistry providerRegistry;
     private readonly IDataProtector settingsProtector;
     private readonly ILogger<DataSourceService> logger;
 
     public DataSourceService(
         IDbContextFactory<TurboBoardDbContext> contextFactory,
-        ISqlServerConnectionTester connectionTester,
+        DataSourceProviderRegistry providerRegistry,
         IDataProtectionProvider dataProtectionProvider,
         ILogger<DataSourceService> logger)
     {
         this.contextFactory = contextFactory;
-        this.connectionTester = connectionTester;
+        this.providerRegistry = providerRegistry;
         settingsProtector = dataProtectionProvider.CreateProtector(ProtectionPurpose);
         this.logger = logger;
     }
@@ -86,7 +86,7 @@ internal sealed class DataSourceService : IDataSourceService
         return record.Id;
     }
 
-    public async Task<SqlServerConnectionTestResult> TestAsync(
+    public async Task<DataSourceConnectionTestResult> TestAsync(
         Guid? id,
         DataSourceDraft draft,
         CancellationToken cancellationToken = default)
@@ -103,7 +103,8 @@ internal sealed class DataSourceService : IDataSourceService
 
         try
         {
-            var result = await connectionTester.TestAsync(ToProviderSettings(settings), cancellationToken);
+            var connectionTester = providerRegistry.GetConnectionTester(ProviderKey);
+            var result = await connectionTester.TestAsync(ToConnectionRequest(settings), cancellationToken);
             logger.LogInformation(
                 ConnectionTestCompleted,
                 "Data Source connection test completed with status {ConnectionTestStatus} for {DataSourceId}",
@@ -113,8 +114,8 @@ internal sealed class DataSourceService : IDataSourceService
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            return new SqlServerConnectionTestResult(
-                SqlServerConnectionTestStatus.Cancelled,
+            return new DataSourceConnectionTestResult(
+                DataSourceConnectionTestStatus.Cancelled,
                 "Connection test cancelled.");
         }
         catch (Exception)
@@ -123,8 +124,8 @@ internal sealed class DataSourceService : IDataSourceService
                 ConnectionTestFailed,
                 "Data Source connection test failed unexpectedly for {DataSourceId}",
                 id);
-            return new SqlServerConnectionTestResult(
-                SqlServerConnectionTestStatus.UnexpectedFailure,
+            return new DataSourceConnectionTestResult(
+                DataSourceConnectionTestStatus.UnexpectedFailure,
                 "TurboBoard could not test this Data Source. Review the settings and try again.");
         }
     }
@@ -146,7 +147,7 @@ internal sealed class DataSourceService : IDataSourceService
     private DataSourceSummary ToSummary(DataSourceRecord record)
     {
         var settings = Unprotect(record.ProtectedSettings);
-        var target = settings.Mode == SqlServerConnectionMode.Structured
+        var target = settings.Mode == DataSourceConnectionMode.Structured
             ? $"{settings.Server} / {settings.Database}"
             : "Advanced connection string";
         return new DataSourceSummary(
@@ -197,8 +198,8 @@ internal sealed class DataSourceService : IDataSourceService
         var previous = existing is null ? null : Unprotect(existing.ProtectedSettings);
         var settings = draft.Mode switch
         {
-            SqlServerConnectionMode.Structured => ResolveStructured(draft, previous, diagnostics),
-            SqlServerConnectionMode.Advanced => ResolveAdvanced(draft, previous, diagnostics),
+            DataSourceConnectionMode.Structured => ResolveStructured(draft, previous, diagnostics),
+            DataSourceConnectionMode.Advanced => ResolveAdvanced(draft, previous, diagnostics),
             _ => throw new DataSourceValidationException(["Choose a supported connection mode."]),
         };
 
@@ -227,7 +228,7 @@ internal sealed class DataSourceService : IDataSourceService
 
         var password = draft.UseIntegratedSecurity
             ? null
-            : string.IsNullOrEmpty(draft.Password) && previous?.Mode == SqlServerConnectionMode.Structured
+            : string.IsNullOrEmpty(draft.Password) && previous?.Mode == DataSourceConnectionMode.Structured
                 ? previous.Password
                 : draft.Password;
         if (!draft.UseIntegratedSecurity && string.IsNullOrWhiteSpace(draft.UserName))
@@ -242,7 +243,7 @@ internal sealed class DataSourceService : IDataSourceService
 
         return new StoredSqlServerSettings
         {
-            Mode = SqlServerConnectionMode.Structured,
+            Mode = DataSourceConnectionMode.Structured,
             Server = draft.Server.Trim(),
             Database = draft.Database.Trim(),
             UseIntegratedSecurity = draft.UseIntegratedSecurity,
@@ -258,30 +259,16 @@ internal sealed class DataSourceService : IDataSourceService
         ICollection<string> diagnostics)
     {
         var connectionString = string.IsNullOrEmpty(draft.ConnectionString)
-            && previous?.Mode == SqlServerConnectionMode.Advanced
+            && previous?.Mode == DataSourceConnectionMode.Advanced
                 ? previous.ConnectionString
                 : draft.ConnectionString;
         if (string.IsNullOrWhiteSpace(connectionString))
         {
             diagnostics.Add("Enter an advanced connection string. Leave it empty only when retaining an existing value.");
         }
-        else
-        {
-            try
-            {
-                _ = SqlServerConnectionString.Create(SqlServerConnectionSettings.CreateAdvanced(
-                    connectionString,
-                    draft.TrustServerCertificate));
-            }
-            catch (ArgumentException)
-            {
-                diagnostics.Add("The advanced connection string is not valid.");
-            }
-        }
-
         return new StoredSqlServerSettings
         {
-            Mode = SqlServerConnectionMode.Advanced,
+            Mode = DataSourceConnectionMode.Advanced,
             ConnectionString = connectionString,
             TrustServerCertificate = draft.TrustServerCertificate,
         };
@@ -306,27 +293,30 @@ internal sealed class DataSourceService : IDataSourceService
         }
     }
 
-    private static SqlServerConnectionSettings ToProviderSettings(StoredSqlServerSettings settings) =>
-        settings.Mode == SqlServerConnectionMode.Structured
-            ? SqlServerConnectionSettings.CreateStructured(
-                settings.Server ?? string.Empty,
-                settings.Database ?? string.Empty,
-                settings.UseIntegratedSecurity,
-                settings.UserName,
-                settings.Password,
-                settings.TrustServerCertificate)
-            : SqlServerConnectionSettings.CreateAdvanced(
-                settings.ConnectionString ?? string.Empty,
-                settings.TrustServerCertificate);
+    private static DataSourceConnectionRequest ToConnectionRequest(StoredSqlServerSettings settings) =>
+        new(
+            ProviderKey,
+            settings.Mode,
+            new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            {
+                [DataSourceConnectionPropertyNames.Endpoint] = settings.Server,
+                [DataSourceConnectionPropertyNames.Catalog] = settings.Database,
+                [DataSourceConnectionPropertyNames.IntegratedAuthentication] = settings.UseIntegratedSecurity.ToString(),
+                [DataSourceConnectionPropertyNames.UserName] = settings.UserName,
+            },
+            settings.Mode == DataSourceConnectionMode.Advanced
+                ? settings.ConnectionString
+                : settings.Password,
+            settings.TrustServerCertificate);
 
     private static bool HasSecret(StoredSqlServerSettings settings) =>
-        settings.Mode == SqlServerConnectionMode.Advanced
+        settings.Mode == DataSourceConnectionMode.Advanced
             ? !string.IsNullOrEmpty(settings.ConnectionString)
             : !settings.UseIntegratedSecurity && !string.IsNullOrEmpty(settings.Password);
 
     private sealed class StoredSqlServerSettings
     {
-        public SqlServerConnectionMode Mode { get; init; }
+        public DataSourceConnectionMode Mode { get; init; }
 
         public string? Server { get; init; }
 

@@ -1,4 +1,4 @@
-using TurboBoard.SqlServer;
+using TurboBoard.Core.DataSources;
 
 namespace TurboBoard.Web.DataSources;
 
@@ -8,7 +8,7 @@ public sealed class DataSourceDraft
 
     public string Description { get; set; } = string.Empty;
 
-    public SqlServerConnectionMode Mode { get; set; } = SqlServerConnectionMode.Structured;
+    public DataSourceConnectionMode Mode { get; set; } = DataSourceConnectionMode.Structured;
 
     public string Server { get; set; } = string.Empty;
 
@@ -46,7 +46,7 @@ public sealed record DataSourceSummary(
     Guid Id,
     string Name,
     string Description,
-    SqlServerConnectionMode Mode,
+    DataSourceConnectionMode Mode,
     string Target,
     bool TrustServerCertificate,
     DateTimeOffset UpdatedAtUtc);
@@ -55,7 +55,7 @@ public sealed record DataSourceDetails(
     Guid Id,
     string Name,
     string Description,
-    SqlServerConnectionMode Mode,
+    DataSourceConnectionMode Mode,
     string Server,
     string Database,
     bool UseIntegratedSecurity,

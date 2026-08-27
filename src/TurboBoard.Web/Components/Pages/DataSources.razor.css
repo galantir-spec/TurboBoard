@@ -13,7 +13,7 @@
     cursor: pointer;
     display: inline-flex;
     font: inherit;
-    font-size: 0.875rem;
+    font-size: 1.125rem;
     font-weight: 600;
     gap: var(--space-8);
     justify-content: center;
@@ -26,18 +26,19 @@
 .icon-button:disabled {
     cursor: not-allowed;
     opacity: 0.5;
+    pointer-events: none;
 }
 
 .button svg,
 .security-icon svg,
 .database-mark svg {
     fill: none;
-    height: 1.25rem;
+    height: 1.5rem;
     stroke: currentColor;
     stroke-linecap: round;
     stroke-linejoin: round;
     stroke-width: 1.8;
-    width: 1.25rem;
+    width: 1.5rem;
 }
 
 .button-primary {
@@ -71,7 +72,12 @@
     color: hsl(var(--destructive-foreground));
 }
 
+.button-destructive:hover:not(:disabled) {
+    background: hsl(var(--destructive-hover));
+}
+
 .button-small {
+    font-size: 0.875rem;
     min-height: 2.5rem;
     padding: var(--space-8) var(--space-16);
 }
@@ -154,7 +160,7 @@
 .warning-badge {
     border-radius: var(--radius-max);
     display: inline-flex;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     font-weight: 600;
     padding: var(--space-2) var(--space-8);
 }
@@ -189,7 +195,7 @@
 
 .data-source-card dt {
     color: hsl(var(--foreground-neutral));
-    font-size: 0.75rem;
+    font-size: 0.875rem;
     font-weight: 600;
     text-transform: uppercase;
 }
@@ -242,6 +248,16 @@
 .editor-heading h2 {
     font-size: 1.5rem;
     margin: var(--space-8) 0 0;
+}
+
+.required-note {
+    color: hsl(var(--foreground-neutral));
+    font-size: 0.875rem;
+    margin: var(--space-16) 0 0;
+}
+
+.required-note span {
+    color: hsl(var(--destructive));
 }
 
 .icon-button {

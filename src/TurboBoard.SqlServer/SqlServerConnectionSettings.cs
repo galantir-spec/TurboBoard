@@ -1,10 +1,6 @@
-namespace TurboBoard.SqlServer;
+using TurboBoard.Core.DataSources;
 
-public enum SqlServerConnectionMode
-{
-    Structured,
-    Advanced,
-}
+namespace TurboBoard.SqlServer;
 
 public sealed record SqlServerConnectionSettings
 {
@@ -12,7 +8,7 @@ public sealed record SqlServerConnectionSettings
     {
     }
 
-    public SqlServerConnectionMode Mode { get; private init; }
+    public DataSourceConnectionMode Mode { get; private init; }
 
     public string? Server { get; private init; }
 
@@ -37,7 +33,7 @@ public sealed record SqlServerConnectionSettings
         bool trustServerCertificate = false) =>
         new()
         {
-            Mode = SqlServerConnectionMode.Structured,
+            Mode = DataSourceConnectionMode.Structured,
             Server = server,
             Database = database,
             UseIntegratedSecurity = useIntegratedSecurity,
@@ -51,7 +47,7 @@ public sealed record SqlServerConnectionSettings
         bool trustServerCertificate = false) =>
         new()
         {
-            Mode = SqlServerConnectionMode.Advanced,
+            Mode = DataSourceConnectionMode.Advanced,
             ConnectionString = connectionString,
             TrustServerCertificate = trustServerCertificate,
         };

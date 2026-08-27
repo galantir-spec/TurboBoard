@@ -1,4 +1,5 @@
 using Microsoft.Data.SqlClient;
+using TurboBoard.Core.DataSources;
 
 namespace TurboBoard.SqlServer.Tests;
 
@@ -50,7 +51,7 @@ public sealed class SqlServerConnectionSettingsTests
 
         var result = await tester.TestAsync(settings, cancellation.Token);
 
-        Assert.Equal(SqlServerConnectionTestStatus.Cancelled, result.Status);
+        Assert.Equal(DataSourceConnectionTestStatus.Cancelled, result.Status);
         Assert.Equal("Connection test cancelled.", result.Message);
     }
 }

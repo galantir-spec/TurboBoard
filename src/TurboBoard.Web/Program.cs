@@ -16,7 +16,7 @@ builder.Services
     .SetApplicationName("TurboBoard")
     .PersistKeysToFileSystem(new DirectoryInfo(statePaths.KeyRingDirectory));
 builder.Services.AddTurboBoardPersistence(statePaths.DatabasePath);
-builder.Services.AddSingleton<ISqlServerConnectionTester, SqlServerConnectionTester>();
+builder.Services.AddTurboBoardSqlServer();
 builder.Services.AddTurboBoardDataSources();
 
 builder.Services.AddRazorComponents()

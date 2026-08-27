@@ -41,6 +41,7 @@
     --warning-subtle: 38 85% 90%;
     --warning-foreground: 32 92% 25%;
     --destructive: 0 72% 51%;
+    --destructive-hover: 0 72% 42%;
     --destructive-subtle: 0 75% 94%;
     --destructive-foreground: var(--base-0);
     --space-0: 0;
@@ -89,6 +90,7 @@
         --warning-subtle: 32 45% 22%;
         --warning-foreground: 38 92% 72%;
         --destructive: 0 72% 58%;
+        --destructive-hover: 0 72% 68%;
         --destructive-subtle: 0 42% 22%;
         --destructive-foreground: var(--neutral-950);
         --shadow-sm: 0 1px 3px hsl(var(--base-1000) / 0.24);
