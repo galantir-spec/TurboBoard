@@ -28,6 +28,9 @@ public sealed class QueriesComponentTests
 
         Assert.Equal(1, savedQueries.SaveCalls);
         Assert.DoesNotContain("You have unsaved changes", component.Markup, StringComparison.Ordinal);
+        var savedQuerySelect = component.FindAll("select")[0];
+        Assert.Contains("Orders by id", savedQuerySelect.TextContent, StringComparison.Ordinal);
+        Assert.Equal(savedQueries.CurrentId.ToString(), savedQuerySelect.GetAttribute("value"));
 
         component.Find("input[maxlength='2000']").Input("Changed locally");
         component.FindAll("button").Single(button => button.TextContent.Trim() == "Reset").Click();
@@ -130,6 +133,17 @@ public sealed class QueriesComponentTests
         Assert.Empty(component.FindAll("input:not([maxlength]):not([type='checkbox'])"));
     }
 
+    [Fact]
+    public void Returning_to_queries_lists_saved_queries_before_selecting_a_data_source()
+    {
+        using var context = CreateContext(out var savedQueries);
+        savedQueries.SeedCurrent();
+
+        var component = context.Render<QueriesPage>();
+
+        Assert.Contains("Orders", component.FindAll("select")[0].TextContent, StringComparison.Ordinal);
+    }
+
     private static BunitContext CreateContext(out FakeSavedQueryService savedQueries)
     {
         var context = new BunitContext();
@@ -204,8 +218,8 @@ public sealed class QueriesComponentTests
             items.Add(new(CurrentId, TestDataSource.Id, "Orders", "", definition, diagnostic, DateTimeOffset.UtcNow));
         }
 
-        public Task<IReadOnlyList<SavedQuerySummary>> ListAsync(Guid dataSourceId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<SavedQuerySummary>>(items.Select(item => new SavedQuerySummary(item.Id, item.DataSourceId, item.Name, item.Description, item.UpdatedAtUtc)).ToArray());
+        public Task<IReadOnlyList<SavedQuerySummary>> ListAsync(Guid? dataSourceId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<SavedQuerySummary>>(items.Where(item => dataSourceId is null || item.DataSourceId == dataSourceId).Select(item => new SavedQuerySummary(item.Id, item.DataSourceId, item.Name, item.Description, item.UpdatedAtUtc)).ToArray());
         public Task<SavedQueryDetails?> GetAsync(Guid id, CancellationToken cancellationToken = default) => Task.FromResult(items.SingleOrDefault(item => item.Id == id));
         public Task<Guid> SaveAsync(Guid? id, SavedQueryDraft draft, CancellationToken cancellationToken = default)
         {

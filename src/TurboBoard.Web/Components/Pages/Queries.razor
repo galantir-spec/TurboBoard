@@ -95,7 +95,7 @@ else if (preview?.Status == QueryPreviewStatus.Failed) { <section class="feedbac
     private SchemaDatabaseObject? SelectedObject => schema?.Objects.SingleOrDefault(item => item.QualifiedName.DisplayName == selectedObjectName);
     private bool CanSaveDefinition => selectedDataSourceId is not null && SelectedObject is not null && selections.Count > 0 && !string.IsNullOrWhiteSpace(queryName) && saveDiagnostic is null;
     private bool CanSaveMetadata => selectedSavedQueryId is not null && saveDiagnostic is not null && !string.IsNullOrWhiteSpace(queryName);
-    protected override async Task OnInitializedAsync() => dataSources = await DataSourceService.ListAsync();
+    protected override async Task OnInitializedAsync() { dataSources = await DataSourceService.ListAsync(); savedQueries = await SavedQueryService.ListAsync(); }
     private async Task ChangeDataSourceAsync(ChangeEventArgs args) { if (!await ConfirmDiscardAsync()) return; selectedDataSourceId = Guid.TryParse(args.Value?.ToString(), out var id) ? id : null; schema = selectedDataSourceId is null ? null : await SchemaService.GetAsync(selectedDataSourceId.Value); savedQueries = selectedDataSourceId is null ? [] : await SavedQueryService.ListAsync(selectedDataSourceId.Value); selectedSavedQueryId = null; queryName = string.Empty; queryDescription = string.Empty; ResetSource(); MarkDirty(); }
     private void ChangeObject(ChangeEventArgs args) { selectedObjectName = args.Value?.ToString() ?? string.Empty; sourceId = Guid.NewGuid(); selections.Clear(); filters.Clear(); preview = null; MarkDirty(); }
     private void ResetSource() { selectedObjectName = string.Empty; sourceId = Guid.NewGuid(); selections.Clear(); filters.Clear(); preview = null; }

@@ -10,13 +10,13 @@ internal sealed class SavedQueryService(
     : ISavedQueryService
 {
     public async Task<IReadOnlyList<SavedQuerySummary>> ListAsync(
-        Guid dataSourceId,
+        Guid? dataSourceId = null,
         CancellationToken cancellationToken = default)
     {
         await using var context = await contextFactory.CreateDbContextAsync(cancellationToken);
-        return await context.SavedQueries
-            .AsNoTracking()
-            .Where(item => item.DataSourceId == dataSourceId)
+        var query = context.SavedQueries.AsNoTracking();
+        if (dataSourceId is Guid id) query = query.Where(item => item.DataSourceId == id);
+        return await query
             .OrderBy(item => item.Name)
             .Select(item => new SavedQuerySummary(
                 item.Id,

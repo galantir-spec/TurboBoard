@@ -26,7 +26,7 @@ public sealed record SavedQueryDetails(
 
 public interface ISavedQueryService
 {
-    Task<IReadOnlyList<SavedQuerySummary>> ListAsync(Guid dataSourceId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SavedQuerySummary>> ListAsync(Guid? dataSourceId = null, CancellationToken cancellationToken = default);
     Task<SavedQueryDetails?> GetAsync(Guid id, CancellationToken cancellationToken = default);
     Task<Guid> SaveAsync(Guid? id, SavedQueryDraft draft, CancellationToken cancellationToken = default);
     Task UpdateMetadataAsync(Guid id, string name, string description, CancellationToken cancellationToken = default);
