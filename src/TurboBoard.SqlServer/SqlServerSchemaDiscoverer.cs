@@ -1,4 +1,5 @@
 using Microsoft.Data.SqlClient;
+using System.Data.Common;
 using TurboBoard.Core.DataSources;
 using TurboBoard.Core.Schemas;
 
@@ -130,7 +131,7 @@ public sealed class SqlServerCatalogReader : ISqlServerCatalogReader
             JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
             WHERE o.type = 'U' AND i.is_unique = 1 AND i.is_hypothetical = 0 AND i.is_disabled = 0 AND i.has_filter = 0 AND ic.key_ordinal > 0
             ORDER BY s.name, o.name, i.name, ic.key_ordinal;
-            ", reader => new SqlServerCatalogKey(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetBoolean(3), reader.GetInt32(4), reader.GetString(5)), cancellationToken);
+            ", MapKey, cancellationToken);
 
     public Task<IReadOnlyList<SqlServerCatalogIndexColumn>> ReadIndexesAsync(
         SqlServerConnectionSettings settings,
@@ -143,7 +144,7 @@ public sealed class SqlServerCatalogReader : ISqlServerCatalogReader
             JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
             WHERE o.type = 'U' AND i.is_hypothetical = 0 AND i.name IS NOT NULL
             ORDER BY s.name, o.name, i.name, ic.is_included_column, ic.key_ordinal, ic.index_column_id;
-            ", reader => new SqlServerCatalogIndexColumn(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetBoolean(3), reader.GetInt32(4), reader.GetBoolean(5), reader.GetString(6)), cancellationToken);
+            ", MapIndex, cancellationToken);
 
     public Task<IReadOnlyList<SqlServerCatalogRelationshipColumn>> ReadRelationshipsAsync(
         SqlServerConnectionSettings settings,
@@ -171,6 +172,12 @@ public sealed class SqlServerCatalogReader : ISqlServerCatalogReader
         while (await reader.ReadAsync(cancellationToken)) items.Add(map(reader));
         return items;
     }
+
+    internal static SqlServerCatalogKey MapKey(DbDataReader reader) =>
+        new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetBoolean(3), reader.GetByte(4), reader.GetString(5));
+
+    internal static SqlServerCatalogIndexColumn MapIndex(DbDataReader reader) =>
+        new(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetBoolean(3), reader.GetByte(4), reader.GetBoolean(5), reader.GetString(6));
 }
 
 public sealed class SqlServerSchemaDiscoverer(ISqlServerCatalogReader catalogReader)

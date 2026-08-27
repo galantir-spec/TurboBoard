@@ -1,10 +1,30 @@
 using TurboBoard.Core.DataSources;
 using TurboBoard.Core.Schemas;
+using System.Data;
 
 namespace TurboBoard.SqlServer.Tests;
 
 public sealed class SqlServerSchemaDiscovererTests
 {
+    [Fact]
+    public void Catalog_key_and_index_ordinals_accept_sql_servers_tinyint_values()
+    {
+        using var keys = Reader(
+            ("Schema", typeof(string)), ("Object", typeof(string)), ("Name", typeof(string)),
+            ("Primary", typeof(bool)), ("Ordinal", typeof(byte)), ("Column", typeof(string)),
+            ["sales", "Orders", "PK_Orders", true, (byte)1, "Id"]);
+        using var indexes = Reader(
+            ("Schema", typeof(string)), ("Object", typeof(string)), ("Name", typeof(string)),
+            ("Unique", typeof(bool)), ("Ordinal", typeof(byte)), ("Included", typeof(bool)), ("Column", typeof(string)),
+            ["sales", "Orders", "IX_Orders", false, (byte)1, false, "Id"]);
+
+        Assert.True(keys.Read());
+        Assert.True(indexes.Read());
+
+        Assert.Equal(1, SqlServerCatalogReader.MapKey(keys).Ordinal);
+        Assert.Equal(1, SqlServerCatalogReader.MapIndex(indexes).KeyOrdinal);
+    }
+
     [Fact]
     public async Task Catalog_rows_map_to_qualified_tables_views_and_normalized_columns()
     {
@@ -87,10 +107,18 @@ public sealed class SqlServerSchemaDiscovererTests
             return;
         }
 
-        var reader = new SqlServerCatalogReader();
-        var rows = await reader.ReadAsync(SqlServerConnectionSettings.CreateAdvanced(connectionString));
+        var configuredConnection = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(connectionString);
+        var request = new DataSourceConnectionRequest(
+            "sql-server",
+            DataSourceConnectionMode.Advanced,
+            new Dictionary<string, string?>(),
+            connectionString,
+            configuredConnection.TrustServerCertificate);
+        var result = await new SqlServerSchemaDiscoverer(new SqlServerCatalogReader())
+            .DiscoverAsync(request);
 
-        Assert.NotNull(rows);
+        Assert.Equal(SchemaDiscoveryStatus.Succeeded, result.Status);
+        Assert.NotNull(result.Objects);
     }
 
     private static DataSourceConnectionRequest CreateRequest() =>
@@ -105,6 +133,37 @@ public sealed class SqlServerSchemaDiscovererTests
             },
             null,
             false);
+
+    private static DataTableReader Reader(
+        (string Name, Type Type) first,
+        (string Name, Type Type) second,
+        (string Name, Type Type) third,
+        (string Name, Type Type) fourth,
+        (string Name, Type Type) fifth,
+        (string Name, Type Type) sixth,
+        object[] values)
+    {
+        var table = new DataTable();
+        foreach (var column in new[] { first, second, third, fourth, fifth, sixth }) table.Columns.Add(column.Name, column.Type);
+        table.Rows.Add(values);
+        return table.CreateDataReader();
+    }
+
+    private static DataTableReader Reader(
+        (string Name, Type Type) first,
+        (string Name, Type Type) second,
+        (string Name, Type Type) third,
+        (string Name, Type Type) fourth,
+        (string Name, Type Type) fifth,
+        (string Name, Type Type) sixth,
+        (string Name, Type Type) seventh,
+        object[] values)
+    {
+        var table = new DataTable();
+        foreach (var column in new[] { first, second, third, fourth, fifth, sixth, seventh }) table.Columns.Add(column.Name, column.Type);
+        table.Rows.Add(values);
+        return table.CreateDataReader();
+    }
 
     private sealed class StubCatalogReader(IReadOnlyList<SqlServerCatalogColumn> columns)
         : ISqlServerCatalogReader
