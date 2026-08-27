@@ -1,6 +1,13 @@
 using System.Net;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using TurboBoard.Core.DataSources;
+using TurboBoard.Core.Schemas;
+using TurboBoard.Web.DataSources;
+using TurboBoard.Web.Schemas;
 
 namespace TurboBoard.Web.Tests;
 
@@ -103,14 +110,72 @@ public sealed class ApplicationShellTests
         Assert.DoesNotContain("not a directory", exception.ToString(), StringComparison.Ordinal);
     }
 
-    private sealed class TurboBoardApplicationFactory(string stateDirectory)
+    [Fact]
+    public async Task Schema_explorer_renders_runtime_discovered_metadata()
+    {
+        using var stateDirectory = TemporaryDirectory.Create();
+        await using var application = new TurboBoardApplicationFactory(
+            stateDirectory.Path,
+            services =>
+            {
+                services.RemoveAll<IDataSourceSchemaDiscoverer>();
+                services.AddSingleton<IDataSourceSchemaDiscoverer, ExplorerSchemaDiscoverer>();
+            });
+        using var client = application.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = new Uri("https://localhost"),
+        });
+        await using var scope = application.Services.CreateAsyncScope();
+        var dataSources = scope.ServiceProvider.GetRequiredService<IDataSourceService>();
+        var schemas = scope.ServiceProvider.GetRequiredService<ISchemaService>();
+        var dataSourceId = await dataSources.SaveAsync(
+            null,
+            DataSourceDraft.Structured("Warehouse", "sql.internal", "analytics", true));
+        _ = await schemas.RefreshAsync(dataSourceId);
+
+        var response = await client.GetAsync($"/data-sources/{dataSourceId}/schema");
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("sales", html, StringComparison.Ordinal);
+        Assert.Contains("Orders", html, StringComparison.Ordinal);
+        Assert.Contains("Table", html, StringComparison.Ordinal);
+        Assert.Contains("Id", html, StringComparison.Ordinal);
+        Assert.Contains("Integer", html, StringComparison.Ordinal);
+        Assert.Contains("int", html, StringComparison.Ordinal);
+        Assert.Contains("No", html, StringComparison.Ordinal);
+    }
+
+    private sealed class TurboBoardApplicationFactory(
+        string stateDirectory,
+        Action<IServiceCollection>? configureServices = null)
         : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             builder.UseEnvironment("Testing");
             builder.UseSetting("TurboBoard:StateDirectory", stateDirectory);
+            if (configureServices is not null)
+            {
+                builder.ConfigureTestServices(configureServices);
+            }
         }
+    }
+
+    private sealed class ExplorerSchemaDiscoverer : IDataSourceSchemaDiscoverer
+    {
+        public string ProviderKey => "sql-server";
+
+        public Task<SchemaDiscoveryResult> DiscoverAsync(
+            DataSourceConnectionRequest request,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(SchemaDiscoveryResult.Succeeded(
+            [
+                new SchemaDatabaseObject(
+                    new QualifiedDatabaseObjectName("sales", "Orders"),
+                    DatabaseObjectKind.Table,
+                    [new SchemaColumn("Id", 1, NormalizedTypeCategory.Integer, "int", false, 4, 10, 0, SchemaColumnCapabilities.Select)]),
+            ]));
     }
 
     private sealed class TemporaryDirectory : IDisposable
