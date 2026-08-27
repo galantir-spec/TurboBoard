@@ -162,7 +162,7 @@ else
                             </label>
                             <label class="field">
                                 <span>Password @if (!hasStoredSecret) { <strong aria-hidden="true">*</strong> }</span>
-                                <input type="password" @bind="draft.Password" @bind:event="oninput" autocomplete="new-password" required="@(!hasStoredSecret)" aria-required="@(!hasStoredSecret)" />
+                                <input type="password" @bind="draft.Password" @bind:event="oninput" autocomplete="new-password" required="@(!hasStoredSecret)" aria-required="@(hasStoredSecret ? "false" : "true")" />
                                 @if (hasStoredSecret)
                                 {
                                     <small>Leave empty to keep the saved password.</small>
@@ -178,7 +178,7 @@ else
                     <h3>Advanced settings</h3>
                     <label class="field">
                         <span>Connection string @if (!hasStoredSecret) { <strong aria-hidden="true">*</strong> }</span>
-                        <textarea class="secret-input" @bind="draft.ConnectionString" @bind:event="oninput" rows="5" autocomplete="off" spellcheck="false" required="@(!hasStoredSecret)" aria-required="@(!hasStoredSecret)"></textarea>
+                        <textarea class="secret-input" @bind="draft.ConnectionString" @bind:event="oninput" rows="5" autocomplete="off" spellcheck="false" required="@(!hasStoredSecret)" aria-required="@(hasStoredSecret ? "false" : "true")"></textarea>
                         <small>@(hasStoredSecret ? "The saved connection string is not shown. Leave empty to keep it." : "The complete value is encrypted before it is saved.")</small>
                     </label>
                 </div>
